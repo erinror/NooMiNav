@@ -8,23 +8,17 @@
 - ⚡ **极速加载**：无第三方库依赖，纯 HTML/CSS 渲染，毫秒级响应。
 - 🛠️ **易于维护**：通过修改 HTML 中的配置项即可快速更换链接。
 
-## 🚀 部署方式
 
-### 方式 A：Cloudflare Pages (推荐)
-1. 将本项目 Fork 到你的 GitHub 仓库。
-2. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)。
-3. 进入 `Workers & Pages` -> `Create application` -> `Pages` -> `Connect to Git`。
-4. 选择此仓库并点击部署即可。
+## ✨ 特性
+- **数据解耦**：链接数据存储在 CF 环境变量中，GitHub 只存代码，安全防爬。
+- **动态跳转**：支持 `/go/:id` 自动重定向。
+- **备用链接**：支持在卡片右侧显示备用跳转地址。
+- **点击统计**：配合 Cloudflare KV 记录访问频次。
 
-### 方式 B：Cloudflare Worker
-1. 复制 `worker.js` (或 `index.html` 中的代码) 到 Worker 编辑器。
-2. 保存并部署。
-
-## ⚙️ 如何修改链接
-打开 `index.html`，找到以下代码块进行修改：
-```html
-<div class="card-list">
-    <a href="你的链接" target="_blank" class="item-link">
-        ...
-    </a>
-</div>
+## ⚙️ 快速配置
+1. **部署 Worker**：复制 `worker.js` 到 Cloudflare Worker。
+2. **设置变量**：在 Worker 控制台添加 `LINKS` 变量，格式如下：
+   ```json
+   [
+     { "id": "x", "name": "名称", "emoji": "🏔️", "note": "备注", "url": "主链接", "backup_url": "备用链接" }
+   ]
