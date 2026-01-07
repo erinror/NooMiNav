@@ -24,7 +24,7 @@
 
 | 变量名 | 必填 | 示例值 | 说明 |
 | --- | --- | --- | --- |
-| **`LINKS`** | 是 | `[{"id":"xueshan","name":"雪山","emoji":"🏔️","note":"备注","url":"https://...","backup_url":"https://..."}]` | 链接配置 (JSON 数组) |
+| **`LINKS`** | 是 | `[{"id":"name","name":"6666","emoji":"🏔️","note":"备注","url":"https://...","backup_url":"https://..."}]` | 链接配置 (JSON 数组) |
 | **`img`** | 否 | `https://cdn.com/my-bg.jpg` | **背景图片链接** (不填则显示动态渐变) |
 | **`kv`** | 否 | (绑定 KV 命名空间) | **点击统计数据库** (变量名必须为 `kv`) |
 | **`TITLE`** | 否 | `FlarePortal` | 网页主标题 |
