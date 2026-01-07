@@ -2,11 +2,19 @@ export async function onRequest(context) {
   const { request, env } = context;
   const url = new URL(request.url);
 
+  // --- 1. 读取环境变量 ---
   let LINKS_DATA = [];
   try {
     LINKS_DATA = env.LINKS ? JSON.parse(env.LINKS) : [];
   } catch (e) {
-    return new Response("LINKS 格式错误", { status: 500 });
+    return new Response("环境变量 LINKS 格式错误", { status: 500 });
+  }
+
+  let FRIENDS_DATA = [];
+  try {
+    FRIENDS_DATA = env.FRIENDS ? JSON.parse(env.FRIENDS) : [];
+  } catch (e) {
+    console.error("FRIENDS 变量格式错误");
   }
 
   const TITLE = env.TITLE || "云端加速 · 精选导航";
@@ -14,6 +22,7 @@ export async function onRequest(context) {
   const CONTACT_URL = env.CONTACT_URL || "https://t.me/Fuzzy_Fbot";
   const BG_IMG = env.img ? `url('${env.img}')` : 'none';
 
+  // --- 2. 路由逻辑 (跳转统计) ---
   if (url.pathname.startsWith("/go/")) {
     const parts = url.pathname.split("/").filter(Boolean);
     const id = parts[1];
@@ -29,17 +38,119 @@ export async function onRequest(context) {
     }
   }
 
+  // 查看统计 (/stats)
   if (url.pathname === "/stats" && env.kv) {
-    let statsHtml = `<html><head><meta charset="UTF-8"><title>统计</title></head><body style="background:#030712;color:#fff;padding:40px;"><h1>📊 点击统计</h1><ul>`;
+    let statsHtml = `<html><head><meta charset="UTF-8"><title>统计</title><style>body{background:#030712;color:#fff;padding:40px;line-height:1.6;font-family:sans-serif;} .box{max-width:500px;margin:0 auto;background:rgba(255,255,255,0.05);padding:20px;border-radius:16px;border:1px solid rgba(255,255,255,0.1);} h1{font-size:1.2rem;margin-bottom:15px;}</style></head><body><div class="box"><h1>📊 实时统计</h1><ul>`;
     for (const item of LINKS_DATA) {
-        const c = await env.kv.get(`click_${item.id}`) || 0;
-        statsHtml += `<li>${item.name}: ${c} 次</li>`;
+      const c1 = await env.kv.get(`click_${item.id}`) || 0;
+      statsHtml += `<li><strong>${item.name}</strong>: ${c1} 次</li>`;
+      if (item.backup_url) {
+        const c2 = await env.kv.get(`click_${item.id}_backup`) || 0;
+        statsHtml += `<li>└ 备用链接: ${c2} 次</li>`;
+      }
     }
-    return new Response(statsHtml + "</ul></body></html>", { headers: { "content-type": "text/html;charset=UTF-8" } });
+    return new Response(statsHtml + "</ul></div></body></html>", { headers: { "content-type": "text/html;charset=UTF-8" } });
   }
 
-  // HTML 内容与上面的 Worker 版一致
-  const html = `... (此处粘贴上面代码中 html 变量内的全部内容) ...`;
+  // --- 3. 页面渲染 ---
+  const html = `
+  <!DOCTYPE html>
+  <html lang="zh-CN">
+  <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>${TITLE}</title>
+      <style>
+          :root { 
+              --primary: #8b5cf6; --bg-color: #030712; 
+              --card-bg: rgba(255, 255, 255, 0.12); 
+              --border: rgba(255, 255, 255, 0.2); 
+              --blur: blur(30px) saturate(160%);
+          }
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { 
+              min-height: 100vh; display: flex; align-items: center; justify-content: center; 
+              background-color: var(--bg-color); font-family: -apple-system, system-ui, sans-serif; color: white; overflow-x: hidden; 
+          }
+          .bg-layer { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-image: ${BG_IMG}; background-size: cover; background-position: center; z-index: -2; }
+          .bg-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: ${env.img ? 'rgba(0,0,0,0.4)' : 'radial-gradient(circle at 10% 10%, rgba(139,92,246,0.2) 0%, transparent 50%), radial-gradient(circle at 90% 90%, rgba(236,72,193,0.2) 0%, transparent 50%)'}; z-index: -1; }
+          
+          .container { width: 95%; max-width: 700px; padding: 20px 0; display: flex; flex-direction: column; gap: 18px; text-align: center; }
+
+          header { padding: 20px; background: var(--card-bg); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); border: 1px solid var(--border); border-radius: 20px; }
+          header h1 { font-size: 1.6rem; background: linear-gradient(to right, #a78bfa, #f472b6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; margin-bottom: 5px; }
+          header p { color: #f1f5f9; font-size: 0.85rem; opacity: 0.8; }
+
+          .section-title { font-size: 0.85rem; color: #94a3b8; text-align: left; margin: 10px 0 2px 5px; font-weight: 600; text-transform: uppercase; }
+
+          .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px; }
+          
+          /* 连体卡片设计 */
+          .card-group { display: flex; height: 76px; }
+          .item-link { flex: 1; display: flex; align-items: center; padding: 0 18px; background: var(--card-bg); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); border: 1px solid var(--border); border-radius: 18px; text-decoration: none; color: white; transition: 0.3s; z-index: 1; }
+          .has-backup .item-link { border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: none; }
+          .item-link:hover { background: rgba(255,255,255,0.2); border-color: var(--primary); z-index: 2; }
+
+          .backup-link { 
+              display: flex; align-items: center; justify-content: center; width: 44px; background: rgba(255,255,255,0.08); 
+              backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); border: 1px solid var(--border); border-radius: 0 18px 18px 0;
+              text-decoration: none; color: #f1f5f9; font-size: 0.75rem; writing-mode: vertical-lr; transition: 0.3s; 
+          }
+          .backup-link:hover { background: var(--primary); color: white; border-color: var(--primary); z-index: 2; }
+
+          .emoji { font-size: 1.3rem; margin-right: 12px; }
+          .info { text-align: left; }
+          .name { font-weight: 700; font-size: 0.95rem; margin-bottom: 2px; }
+          .note { font-size: 0.72rem; color: #fcd34d; font-weight: 600; }
+
+          .friends-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+          .friend-link { padding: 12px; background: rgba(255,255,255,0.08); border-radius: 12px; border: 1px solid var(--border); backdrop-filter: var(--blur); -webkit-backdrop-filter: blur(10px); text-decoration: none; color: #cbd5e1; font-size: 0.85rem; transition: 0.3s; text-align: center; }
+          .friend-link:hover { background: rgba(255,255,255,0.18); color: white; border-color: var(--primary); }
+
+          .footer { margin-top: 10px; }
+          .contact-btn { display: inline-flex; align-items: center; gap: 8px; background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); padding: 10px 30px; border-radius: 50px; color: white; text-decoration: none; font-size: 0.9rem; font-weight: 600; transition: 0.3s; }
+          .contact-btn:hover { transform: scale(1.05); }
+      </style>
+  </head>
+  <body>
+      <div class="bg-layer"></div>
+      <div class="background-overlay"></div>
+      <div class="container">
+          <header>
+              <h1>${TITLE}</h1>
+              <p>${SUBTITLE}</p>
+          </header>
+
+          <div class="section-title">💎 精选套餐</div>
+          <div class="card-grid">
+              ${LINKS_DATA.map(link => `
+                  <div class="card-group ${link.backup_url ? 'has-backup' : ''}">
+                      <a href="/go/${link.id}" class="item-link">
+                          <span class="emoji">${link.emoji}</span>
+                          <div class="info">
+                              <div class="name">${link.name}</div>
+                              <div class="note">⚠️ ${link.note}</div>
+                          </div>
+                      </a>
+                      ${link.backup_url ? `<a href="/go/${link.id}/backup" class="backup-link">备用</a>` : ''}
+                  </div>
+              `).join('')}
+          </div>
+
+          ${FRIENDS_DATA.length > 0 ? `
+          <div class="section-title">🔗 友情链接</div>
+          <div class="friends-grid">
+              ${FRIENDS_DATA.map(f => `<a href="${f.url}" target="_blank" class="friend-link">${f.name}</a>`).join('')}
+          </div>
+          ` : ''}
+
+          <div class="footer">
+              <a href="${CONTACT_URL}" target="_blank" class="contact-btn">💬 联系我们</a>
+          </div>
+      </div>
+  </body>
+  </html>
+  `;
 
   return new Response(html, { headers: { "content-type": "text/html;charset=UTF-8" } });
 }
