@@ -6,7 +6,7 @@ export async function onRequest(context) {
   // --- 1. 配置获取 ---
   const TITLE = env.TITLE || "云端加速 · 精选导航";
   const SUBTITLE = env.SUBTITLE || "优质资源推荐 · 随时畅联";
-  const ADMIN_PASS = env.admin || "qwer1234"; 
+  const ADMIN_PASS = env.admin || "123456"; 
   const BG_IMG = env.img ? `url('${env.img}')` : 'none';
   const CONTACT_URL = env.CONTACT_URL || "https://t.me/Fuzzy_Fbot";
 
