@@ -12,24 +12,39 @@
 * 🎨 **高级视觉**：采用毛玻璃（Glassmorphism）特效，支持自定义背景图（`img` 变量）。
 * 🔗 **链接解耦**：所有导航链接通过环境变量 `LINKS` 配置，GitHub 不泄露任何内容。
 * 🛡️ **备用支持**：支持为每个项目配置“备用链接”，满足高可用需求。
-* 📈 **点击统计**：通过绑定 `kv` 变量，实时记录每个链接的访问频次。
+* 📈 **点击统计**：通过绑定 `db` 变量，实时记录每个链接的访问频次。
 * 📱 **完美适配**：全响应式设计，手机、平板、电脑端均有极佳体验。
-* 📊 **统计面板**：通过访问 `/stats` 路径即可查看各链接的实时点击量。
+* 📊 **统计面板**：通过访问 `/admin` 路径即可查看各链接的实时点击量。
 
 ---
 
-## 🛠️ 环境变量配置 (关键)
-
-在部署后，请务必在 Cloudflare 后台设置以下变量。
+## ⚙️ 环境变量配置 (关键)
 
 | 变量名 | 必填 | 示例值 | 说明 |
-| --- | --- | --- | --- |
-| **`LINKS`** | 是 | `[{"id":"name","name":"6666","emoji":"🏔️","note":"备注","url":"https://...","backup_url":"https://..."}]` | 链接配置 (JSON 数组) |
-| **`img`** | 否 | `https://cdn.com/my-bg.jpg` | **背景图片链接** (不填则显示动态渐变) |
-| **`kv`** | 否 | (绑定 KV 命名空间) | **点击统计数据库** (变量名必须为 `kv`) |
-| **`TITLE`** | 否 | `FlarePortal` | 网页主标题 |
-| **`SUBTITLE`** | 否 | `精选套餐推荐` | 副标题 |
-| **`CONTACT_URL`** | 否 | `https://t.me/your_id` | 联系按钮跳转链接 |
+| :--- | :---: | :--- | :--- |
+| **`db`** | **是** | (绑定 D1 数据库) | **D1 数据库绑定名** (变量名必须小写 `db`) |
+| **`admin`** | **是** | `your_password` | **管理后台密码** |
+| **`LINKS`** | 是 | `[...]` | 套餐配置 (JSON 格式) |
+| **`FRIENDS`**| 否 | `[...]` | 友链配置 (JSON 格式) |
+| **`img`** | 否 | `https://cdn.com/bg.jpg` | 自定义背景图片链接 |
+| **`TITLE`** | 否 | `我的导航站` | 网页主标题 |
+
+## 🚀 部署步骤
+
+### 1. 初始化数据库
+在 Cloudflare D1 控制台执行以下 SQL：
+```sql
+CREATE TABLE IF NOT EXISTS stats (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    type TEXT,
+    total_clicks INTEGER DEFAULT 0,
+    year_clicks INTEGER DEFAULT 0,
+    month_clicks INTEGER DEFAULT 0,
+    last_year TEXT,
+    last_month TEXT
+);
+```
 
 ### `LINKS` 变量 JSON 模板：
 
@@ -77,8 +92,7 @@
 
 部署完成后，你可以通过访问以下路径查看统计信息：
 
-* **主页**: `https://your-domain.com/`
-* **统计页**: `https://your-domain.com/stats` (仅在绑定了 `kv` 后生效)
+访问 你的域名/admin，输入你设置的 admin 密码即可进入数据看板。
 
 ---
 
@@ -100,6 +114,3 @@
 
 ---
 
-### 💡 维护建议
-
-如果你想临时更换某个链接，只需要在 Cloudflare 仪表板修改 `LINKS` 环境变量，无需操作 GitHub。修改完成后，建议手动点击一次 **"Redeploy"** 以确保 Pages Functions 立即生效。
