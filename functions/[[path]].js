@@ -6,8 +6,8 @@ export async function onRequest(context) {
   // --- 1. 配置区域 ---
   const TITLE = env.TITLE || "云端加速 · 精选导航";
   const SUBTITLE = env.SUBTITLE || "优质资源推荐 · 随时畅联";
-  const ADMIN_PASS = env.admin || "qwer1234"; 
-  const RAW_IMG = env.img || "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=2073"; 
+  const ADMIN_PASS = env.admin || "123456";  
+  const RAW_IMG = env.img || ""; 
   const BG_CSS = RAW_IMG ? `url('${RAW_IMG}')` : 'none';
   const CONTACT_URL = env.CONTACT_URL || "https://t.me/Fuzzy_Fbot";
 
@@ -23,9 +23,11 @@ export async function onRequest(context) {
   const dateKey = `${currYear}_${currMonth}`;
   const fullTimeStr = now.toISOString().replace('T', ' ').substring(0, 19);
 
-  // 后台背景逻辑
+  // 背景逻辑
   const SHARED_BG_HTML = `
+    <div style="position:fixed;inset:0;background:#1e293b;z-index:-3;"></div>
     <div class="bg-img" style="position:fixed;inset:0;background:${BG_CSS} center/cover;z-index:-2;opacity:0;transition:opacity 0.5s ease-in;"></div>
+    <div style="position:fixed;inset:0;background:radial-gradient(circle at center, transparent 60%, rgba(0,0,0,0.3));pointer-events:none;z-index:-1;"></div>
     <script>
       const img = new Image();
       img.src = "${RAW_IMG}";
@@ -36,19 +38,20 @@ export async function onRequest(context) {
   const FONT_STACK = `'SF Pro Display', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
 
   try {
-    // API: 日志查询
+    // API 查询
     if (url.pathname === "/admin/api/logs") {
       const id = url.searchParams.get('id');
       const m = url.searchParams.get('m') || dateKey;
       if (!env.db) return new Response("{}", {status: 500});
+      
+      // 优化查询：按时间倒序
       const { results } = await env.db.prepare("SELECT click_time FROM logs WHERE link_id = ? AND month_key = ? ORDER BY id DESC LIMIT 50").bind(id, m).all();
       return new Response(JSON.stringify(results || []), { headers: { "content-type": "application/json" } });
     }
 
-    // --- 后台管理页面 ---
+    // 后台管理
     if (url.pathname === "/admin") {
       const cookie = request.headers.get('Cookie') || '';
-      // 登录逻辑
       if (request.method === 'POST') {
         const formData = await request.formData();
         if (formData.get('password') === ADMIN_PASS) {
@@ -58,25 +61,19 @@ export async function onRequest(context) {
       if (!cookie.includes(`${COOKIE_NAME}=true`)) return new Response(renderLoginPageV10(TITLE, SHARED_BG_HTML, FONT_STACK, RAW_IMG), { headers: { "content-type": "text/html;charset=UTF-8" } });
 
       const selectedMonth = url.searchParams.get('m') || dateKey;
-      
-      // 【核心修改】：先获取所有统计数据，存入 Map 方便查找
-      const { results } = await env.db.prepare("SELECT * FROM stats").all();
-      const statsMap = new Map();
-      if(results) results.forEach(r => statsMap.set(r.id, r));
-
-      // 渲染后台：传入 LINKS 和 FRIENDS 配置，不再只传 results
-      return new Response(renderAdminDashboard(LINKS_DATA, FRIENDS_DATA, statsMap, TITLE, selectedMonth, SHARED_BG_HTML, FONT_STACK, RAW_IMG), { headers: { "content-type": "text/html;charset=UTF-8" } });
+      const { results } = await env.db.prepare("SELECT * FROM stats ORDER BY total_clicks DESC").all();
+      return new Response(renderStatsHTMLV10(results || [], TITLE, selectedMonth, SHARED_BG_HTML, FONT_STACK, RAW_IMG), { headers: { "content-type": "text/html;charset=UTF-8" } });
     }
 
+    // 退出登录
     if (url.pathname === "/admin/logout") return new Response(null, { status: 302, headers: { 'Location': '/admin', 'Set-Cookie': `${COOKIE_NAME}=; Path=/; Max-Age=0` } });
 
-    // --- 跳转逻辑 ---
+    // 跳转逻辑
     if (url.pathname.startsWith("/go/")) {
       const id = url.pathname.split("/")[2];
       const isBackup = url.pathname.split("/")[3] === "backup";
       const item = LINKS_DATA.find(l => l.id === id);
       if (item) {
-        // 记录点击
         if (env.db) context.waitUntil(recordClick(env.db, isBackup ? `${id}_backup` : id, item.name + (isBackup ? "(备用)" : ""), 'link', currYear, dateKey, fullTimeStr));
         return Response.redirect(isBackup && item.backup_url ? item.backup_url : item.url, 302);
       }
@@ -86,199 +83,60 @@ export async function onRequest(context) {
       const idx = parseInt(url.pathname.split("/")[2]);
       const friend = FRIENDS_DATA[idx];
       if (friend) {
-        // 记录点击 (友链 ID 格式: friend_0, friend_1...)
         if (env.db) context.waitUntil(recordClick(env.db, `friend_${idx}`, friend.name, 'friend', currYear, dateKey, fullTimeStr));
         return Response.redirect(friend.url, 302);
       }
     }
 
-    // --- 前台主页 ---
-    return new Response(renderNewNavHTML(TITLE, SUBTITLE, RAW_IMG, CONTACT_URL, LINKS_DATA, FRIENDS_DATA), { headers: { "content-type": "text/html;charset=UTF-8" } });
+    // 主页
+    return new Response(renderMainHTMLV10(TITLE, SUBTITLE, SHARED_BG_HTML, CONTACT_URL, LINKS_DATA, FRIENDS_DATA, FONT_STACK, RAW_IMG), { headers: { "content-type": "text/html;charset=UTF-8" } });
 
   } catch (err) {
     return new Response(`🚨 Error: ${err.message}`, { status: 500 });
   }
 }
 
-// 记录数据
+// 登录页面的渲染函数
+function renderLoginPageV10(T, BG, FS, IMG) {
+  return `<!DOCTYPE html><html><head>${getHead(T, FS, IMG)}<style>.login-box { padding: 50px; text-align: center; width: 320px; } input { width: 100%; padding: 15px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; color: #fff; margin-bottom: 20px; outline: none; transition: 0.3s; } input:focus { border-color: #a78bfa; background: rgba(0,0,0,0.4); } button { width: 100%; padding: 15px; background: #fff; color: #000; border: none; border-radius: 12px; font-weight: 800; cursor: pointer; transition: 0.3s; } button:hover { transform: scale(1.03); }</style></head><body>${BG}<div class="glass-panel login-box"><h1>${T}</h1><form method="POST"><input type="password" name="password" placeholder="输入口令..." required autofocus><button type="submit">进入后台</button></form></div></body></html>`;
+}
+
 async function recordClick(db, id, name, type, y, m, timeStr) {
   try {
-    // 插入详细日志
+    // 1. 写日志
     await db.prepare("INSERT INTO logs (link_id, click_time, month_key) VALUES (?, ?, ?)").bind(id, timeStr, m).run();
-    // 插入或更新统计 (ON CONFLICT 依赖 id 为主键)
+    // 2. 更新统计
     await db.prepare(`INSERT INTO stats (id, name, type, total_clicks, year_clicks, month_clicks, last_year, last_month, last_time) VALUES (?1, ?2, ?3, 1, 1, 1, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET total_clicks = total_clicks + 1, year_clicks = CASE WHEN last_year = ?4 THEN year_clicks + 1 ELSE 1 END, month_clicks = CASE WHEN last_month = ?5 THEN month_clicks + 1 ELSE 1 END, last_year = ?4, last_month = ?5, last_time = ?6, name = ?2`).bind(id, name, type, y, m, timeStr).run();
-  } catch (e) { console.error("Record Error:", e); }
+  } catch (e) { console.error(e); }
 }
 
-/** * ✨ 前台主页渲染 (保持高颜值)
- */
-function renderNewNavHTML(TITLE, SUBTITLE, BG_IMG_URL, CONTACT, LINKS, FRIENDS) {
-  const cardsHtml = LINKS.map(item => {
-    const mainUrl = `/go/${item.id}`;
-    const backupHtml = item.backup_url ? `<a href="/go/${item.id}/backup" class="tag-backup" title="备用线路">备用</a>` : '';
-    return `
-    <div class="glass-card resource-card-wrap">
-        <a href="${mainUrl}" class="resource-main-link">
-            <div class="card-icon">${item.emoji}</div>
-            <div class="card-info"><h3>${item.name}</h3><p>⚠️ ${item.note}</p></div>
-        </a>
-        ${backupHtml}
-    </div>`;
-  }).join('');
-
-  const friendsHtml = FRIENDS.map((f, i) => `<a href="/fgo/${i}" target="_blank" class="glass-card partner-card">${f.name}</a>`).join('');
-
-  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${TITLE}</title><style>
-    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-    body { font-family: -apple-system, BlinkMacSystemFont, Roboto, sans-serif; color: #fff; background: url('${BG_IMG_URL}') no-repeat center center fixed; background-size: cover; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 40px 20px 100px; }
-    .container { width: 100%; max-width: 800px; }
-    .glass-card { background: rgba(255, 255, 255, 0.15); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.15); transition: 0.2s; }
-    .header { text-align: center; padding: 40px 20px; margin-bottom: 30px; }
-    .header h1 { font-size: 3rem; font-weight: 800; margin-bottom: 10px; text-shadow: 0 4px 15px rgba(0,0,0,0.4); }
-    .section-title { font-size: 1rem; font-weight: 800; color: #7dd3fc; margin-bottom: 15px; margin-left: 5px; text-transform: uppercase; text-shadow: 0 2px 4px rgba(0,0,0,0.6); }
-    .grid-resources { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-bottom: 40px; }
-    .resource-card-wrap { display: flex; position: relative; overflow: hidden; }
-    .resource-card-wrap:hover { background: rgba(255, 255, 255, 0.25); transform: translateY(-3px); }
-    .resource-main-link { flex: 1; display: flex; align-items: center; text-decoration: none; color: white; padding: 20px; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
-    .card-icon { font-size: 2.5rem; margin-right: 15px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
-    .card-info h3 { font-size: 1.2rem; font-weight: 700; margin-bottom: 4px; }
-    .card-info p { font-size: 0.85rem; color: #fcd34d; font-weight: 500; }
-    .tag-backup { width: 36px; background: rgba(0,0,0,0.3); border-left: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: #e2e8f0; writing-mode: vertical-rl; letter-spacing: 2px; text-decoration: none; transition: 0.2s; }
-    .tag-backup:hover { background: #8b5cf6; color: white; }
-    .grid-partners { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 40px; }
-    .partner-card { text-decoration: none; color: #fff; text-align: center; padding: 15px 10px; font-size: 0.9rem; border-radius: 12px; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
-    .partner-card:hover { background: rgba(255, 255, 255, 0.25); transform: translateY(-2px); }
-    .fab-support { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, #8b5cf6, #a855f7); color: white; padding: 12px 30px; border-radius: 50px; text-decoration: none; font-weight: bold; box-shadow: 0 10px 25px rgba(139, 92, 246, 0.5); z-index: 100; transition: 0.2s; }
-    .fab-support:hover { transform: translateX(-50%) scale(1.05); }
-    @media (max-width: 600px) { .header h1 { font-size: 2.5rem; } .grid-resources { grid-template-columns: 1fr; } }
-  </style></head><body><div class="container"><div class="header glass-card"><h1>${TITLE}</h1><p>${SUBTITLE}</p></div><div class="section-title">💎 精选资源</div><div class="grid-resources">${cardsHtml}</div><div class="section-title">🔗 合作伙伴</div><div class="grid-partners">${friendsHtml}</div></div><a href="${CONTACT}" class="fab-support">💬 获取支持</a></body></html>`;
-}
-
-/** * ✨ 管理后台渲染 (现在和首页布局一模一样！)
- * 核心逻辑：遍历 LINKS 和 FRIENDS，去 statsMap 里找数据
- */
-function renderAdminDashboard(LINKS, FRIENDS, statsMap, T, m, BG, FS, IMG) {
-  let totalClicks = 0;
-  for (let v of statsMap.values()) totalClicks += (v.total_clicks || 0);
-
-  // 1. 生成精选资源管理卡片
-  const resourceHtml = LINKS.map((item, i) => {
-    // 从数据库 Map 中找对应 ID 的数据
-    const stat = statsMap.get(item.id) || { total_clicks: 0, month_clicks: 0, year_clicks: 0, last_time: '暂无记录' };
-    const p = totalClicks > 0 ? ((stat.total_clicks / totalClicks) * 100).toFixed(1) : 0;
-    
-    return `
-    <div class="glass-panel card" onclick="openLog('${item.id}','${m}','${item.name}')" style="animation-delay:${i * 0.05}s">
-        <div class="row">
-            <div style="display:flex;align-items:center;gap:10px;">
-                <span class="emoji-small">${item.emoji}</span>
-                <span class="card-name">${item.name}</span>
-            </div>
-            <span class="percent">${p}%</span>
-        </div>
-        <div class="data-row">
-            <span>本月 <b class="highlight">${stat.month_clicks}</b></span>
-            <span>总计 <b>${stat.total_clicks}</b></span>
-        </div>
-        <div class="bar"><div class="fill" style="width:${p}%"></div></div>
-        <div class="time">🕒 ${stat.last_time}</div>
-    </div>`;
-  }).join('');
-
-  // 2. 生成合作伙伴管理卡片
-  const friendHtml = FRIENDS.map((item, i) => {
-    const id = `friend_${i}`; // 友链在数据库里的 ID 格式
-    const stat = statsMap.get(id) || { total_clicks: 0, month_clicks: 0, year_clicks: 0, last_time: '暂无记录' };
-    const p = totalClicks > 0 ? ((stat.total_clicks / totalClicks) * 100).toFixed(1) : 0;
-
-    return `
-    <div class="glass-panel card-mini" onclick="openLog('${id}','${m}','${item.name}')">
-        <div class="row-mini">
-            <span class="card-name-mini">${item.name}</span>
-            <span class="percent-mini">${stat.total_clicks}次</span>
-        </div>
-        <div class="time-mini">${stat.last_time.split(' ')[1] || '-'}</div>
-    </div>`;
-  }).join('');
-
+// 后台统计页面的渲染函数
+function renderStatsHTMLV10(results, T, m, BG, FS, IMG) {
+  const total = results.reduce((s, r) => s + (r.total_clicks || 0), 0);
   return `<!DOCTYPE html><html><head>${getHead(T, FS, IMG)}<style>
-    .main { width: 90%; max-width: 900px; padding: 40px 0; }
-    .header { padding: 30px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
-    .section-label { color: #7dd3fc; font-weight: 800; margin: 30px 0 15px 5px; text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 2px 4px rgba(0,0,0,0.6); }
-    
-    /* 资源 Grid (和首页类似，但更紧凑) */
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; }
-    
-    /* 友链 Grid */
-    .grid-mini { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
-
-    /* 卡片样式 */
-    .card { padding: 20px; cursor: pointer; transition: 0.2s; animation: fadeUp 0.5s backwards; }
-    .card:hover { transform: translateY(-3px); background: rgba(30, 41, 59, 0.8); border-color: #a78bfa; }
-    .emoji-small { font-size: 1.5rem; }
-    .card-name { font-weight: 700; font-size: 1.1rem; }
-    .percent { font-weight: 700; color: #a78bfa; }
-    .data-row { display: flex; justify-content: space-between; margin: 15px 0 10px; font-size: 0.9rem; color: #cbd5e1; }
-    .highlight { color: #fff; }
-    .bar { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }
-    .fill { height: 100%; background: #a78bfa; }
-    .time { font-size: 0.75rem; color: #94a3b8; text-align: right; margin-top: 10px; font-family: monospace; }
-
-    /* 迷你卡片 (友链) */
-    .card-mini { padding: 15px; cursor: pointer; transition: 0.2s; }
-    .card-mini:hover { background: rgba(30, 41, 59, 0.8); border-color: #a78bfa; }
-    .row-mini { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 5px; }
-    .card-name-mini { font-weight: 600; }
-    .percent-mini { color: #a78bfa; font-weight: 700; }
-    .time-mini { font-size: 0.7rem; color: #64748b; text-align: right; font-family: monospace; }
-
-    /* 抽屉 & 其他 */
-    .badge { background: #fff; color: #0f172a; padding: 8px 20px; border-radius: 12px; font-weight: 800; }
-    .drawer { position: fixed; top: 0; right: -420px; width: 380px; height: 100vh; background: rgba(15, 23, 42, 0.98); border-left: 1px solid var(--border); transition: 0.4s cubic-bezier(0.19, 1, 0.22, 1); z-index: 99; display: flex; flex-direction: column; }
-    .drawer.open { right: 0; box-shadow: -20px 0 50px rgba(0,0,0,0.5); }
-    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 90; opacity: 0; pointer-events: none; transition: 0.3s; }
-    .overlay.show { opacity: 1; pointer-events: auto; }
-    @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-  </style></head><body>${BG}<div class="main">
-    <header class="glass-panel header">
-        <div><h1>数据看板</h1><div style="font-size:0.85rem;opacity:0.7;margin-top:5px">当前周期: ${m}</div></div>
-        <div style="text-align:right"><div class="badge">总点击: ${totalClicks}</div><a href="/admin/logout" style="display:block;margin-top:10px;color:#f87171;font-size:0.8rem;text-decoration:none;font-weight:700">安全退出</a></div>
-    </header>
-
-    <div class="section-label">💎 精选资源数据</div>
-    <div class="grid">${resourceHtml}</div>
-
-    <div class="section-label">🔗 合作伙伴数据</div>
-    <div class="grid-mini">${friendHtml}</div>
-
-  </div>
-  
-  <div class="overlay" id="mask" onclick="closeDrawer()"></div>
-  <div class="drawer" id="drawer">
-      <div style="padding:20px;border-bottom:1px solid rgba(255,255,255,0.1);display:flex;justify-content:space-between;align-items:center;">
-          <h3 style="margin:0;font-size:1.1rem" id="d-title">详情</h3>
-          <button onclick="closeDrawer()" style="background:none;border:none;color:#fff;font-size:1.5rem;cursor:pointer">×</button>
-      </div>
-      <ul style="flex:1;overflow-y:auto;padding:0;margin:0;list-style:none;" id="d-list"></ul>
-  </div>
-
-  <script>
-    async function openLog(id,m,n){
-        document.getElementById('drawer').classList.add('open');
-        document.getElementById('mask').classList.add('show');
-        document.getElementById('d-title').innerText = n + ' - 详细记录';
-        const l=document.getElementById('d-list');
-        l.innerHTML='<li style="padding:25px;text-align:center">📡 加载中...</li>';
-        try{
-            const r=await fetch(\`/admin/api/logs?id=\${id}&m=\${m}\`);
-            const d=await r.json();
-            l.innerHTML=d.length?d.map((x,i)=>\`<li style="padding:12px 20px;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;justify-content:space-between;font-size:0.85rem;color:#cbd5e1"><span>#\${i+1}</span><span style="font-family:monospace;color:#a78bfa">\${x.click_time}</span></li>\`).join(''):'<li style="padding:25px;text-align:center;opacity:0.5">暂无点击记录</li>';
-        }catch(e){l.innerHTML='<li style="padding:25px;text-align:center;color:#f87171">加载失败</li>';}
-    }
-    function closeDrawer(){document.getElementById('drawer').classList.remove('open');document.getElementById('mask').classList.remove('show');}
-  </script></body></html>`;
+    .main { width: 90%; max-width: 1000px; padding: 40px 0; }
+    .header { padding: 30px 40px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+    h1 { font-size: 1.8rem; margin: 0; font-weight: 800; }
+    .badge { background: #fff; color: #0f172a; padding: 10px 25px; border-radius: 16px; font-weight: 800; text-shadow: none; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
+    .card { padding: 25px; transition: 0.3s; position: relative; cursor: pointer; animation: fadeUp 0.5s backwards; }
+    .card:hover { transform: translateY(-3px); border-color: #a78bfa; background: rgba(30, 41, 59, 0.7); }
+    .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+    .title { font-size: 1.2rem; font-weight: 700; }
+    .data { font-family: 'SF Mono', Menlo, monospace; font-size: 0.9rem; color: #e2e8f0; }
+    .bar { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; margin: 15px 0; }
+    .fill { height: 100%; background: #a78bfa; border-radius: 3px; }
+    .time { font-size: 0.75rem; color: #94a3b8; text-align: right; font-family: monospace; opacity: 0.8; }
+  </style></head><body>${BG}<div class="main"><header class="glass-panel header">
+    <div><h1>数据中心</h1><div style="font-size:0.9rem;opacity:0.8;margin-top:5px">周期: ${m}</div></div>
+    <div style="text-align:right"><div class="badge">总计 ${total} 次</div><a href="/admin/logout" style="display:block;margin-top:10px;color:#f87171;font-size:0.8rem;text-decoration:none;font-weight:700">安全退出</a></div>
+  </header>
+  <div class="grid">${results.map((r,i)=>{const p=total>0?((r.total_clicks/total)*100).toFixed(1):0; return `
+    <div class="glass-panel card" onclick="openLog('${r.id}','${m}','${r.name||r.id}')" style="animation-delay:${i*0.03}s">
+      <div class="row"><span style="font-size:0.75rem;font-weight:800;color:#cbd5e1;text-transform:uppercase">#${r.type}</span><span style="font-weight:700;color:#a78bfa">${p}%</span></div>
+      <div class="title">${r.name||r.id}</div>
+      <div class="data"><span>本月 <b style="color:#fff">${r.month_clicks}</b></span><span>年度 <b>${r.year_clicks}</b></span></div>
+      <div class="bar"><div class="fill" style="width:${p}%"></div></div>
+      <div class="time">🕒 ${r.last_time || '待记录'}</div>
+    </div>`}).join('')}</div></div></body></html>`;
 }
-
-// 登录页 & 通用 Head (保持简洁)
-const getHead = (t, fs, img) => `<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${t}</title><style>:root{--glass:rgba(15,23,42,0.6);--border:rgba(255,255,255,0.15);--text-shadow:0 2px 4px rgba(0,0,0,0.8)}body{margin:0;min-height:100vh;font-family:${fs};color:#fff;display:flex;justify-content:center;align-items:center}.glass-panel{background:var(--glass);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--border);box-shadow:0 8px 32px rgba(0,0,0,0.2);border-radius:16px}h1,div,span,a{text-shadow:var(--text-shadow)}</style>`;
-function renderLoginPageV10(T, BG, FS, IMG) { return `<!DOCTYPE html><html><head>${getHead(T, FS, IMG)}<style>.box{padding:40px;text-align:center;width:300px}input{width:100%;padding:12px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.2);border-radius:8px;color:#fff;margin-bottom:20px;outline:none}button{width:100%;padding:12px;background:#fff;color:#000;border:none;border-radius:8px;font-weight:800;cursor:pointer}</style></head><body>${BG}<div class="glass-panel box"><h1>${T}</h1><form method="POST"><input type="password" name="password" required autofocus><button type="submit">LOGIN</button></form></div></body></html>`; }
