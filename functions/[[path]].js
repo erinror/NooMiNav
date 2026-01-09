@@ -1,15 +1,13 @@
 export async function onRequest(context) {
   const { request, env } = context;
   const url = new URL(request.url);
-  const COOKIE_NAME = "nav_session_v8_speed";
+  const COOKIE_NAME = "nav_session_v10_final";
 
-  // --- 1. 核心配置 ---
+  // --- 1. 配置区域 ---
   const TITLE = env.TITLE || "云端加速 · 精选导航";
   const SUBTITLE = env.SUBTITLE || "优质资源推荐 · 随时畅联";
-  const ADMIN_PASS = env.admin || "qwer1234"; 
-  // 获取原始图片链接用于预加载
+  const ADMIN_PASS = env.admin || "123456"; 
   const RAW_IMG = env.img || ""; 
-  // CSS 用的背景样式
   const BG_CSS = RAW_IMG ? `url('${RAW_IMG}')` : 'none';
   const CONTACT_URL = env.CONTACT_URL || "https://t.me/Fuzzy_Fbot";
 
@@ -17,7 +15,7 @@ export async function onRequest(context) {
   const LINKS_DATA = getJson('LINKS');
   const FRIENDS_DATA = getJson('FRIENDS');
 
-  // 时间工具 (UTC+8)
+  // 时间 (UTC+8)
   const getNow = () => new Date(new Date().getTime() + 8 * 3600000);
   const now = getNow();
   const currYear = now.getFullYear().toString();
@@ -25,52 +23,47 @@ export async function onRequest(context) {
   const dateKey = `${currYear}_${currMonth}`;
   const fullTimeStr = now.toISOString().replace('T', ' ').substring(0, 19);
 
-  // 统一背景 HTML (带淡入动画)
-  // 技巧：先用纯色填充，图片加载完后通过 CSS 淡入，解决"加载一半"的丑陋感
+  // V10 背景逻辑: 极速预加载 + 无损原色显示
   const SHARED_BG_HTML = `
-    <div class="bg-placeholder" style="position:fixed;inset:0;background:#0f172a;z-index:-3;"></div>
-    <div class="bg-img" style="position:fixed;inset:0;background:${BG_CSS} center/cover;z-index:-2;filter:brightness(0.85);opacity:0;transition:opacity 0.8s ease-in;"></div>
-    <div style="position:fixed;inset:0;background:rgba(15, 23, 42, 0.75);backdrop-filter:blur(10px);z-index:-1;"></div>
+    <div style="position:fixed;inset:0;background:#1e293b;z-index:-3;"></div>
+    <div class="bg-img" style="position:fixed;inset:0;background:${BG_CSS} center/cover;z-index:-2;opacity:0;transition:opacity 0.5s ease-in;"></div>
+    <div style="position:fixed;inset:0;background:radial-gradient(circle at center, transparent 60%, rgba(0,0,0,0.3));pointer-events:none;z-index:-1;"></div>
     <script>
-      // 图片预加载完毕后执行淡入
       const img = new Image();
       img.src = "${RAW_IMG}";
       img.onload = () => { document.querySelector('.bg-img').style.opacity = 1; };
     </script>
   `;
 
-  // 字体栈
-  const FONT_STACK = `'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+  const FONT_STACK = `'SF Pro Display', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
 
   try {
-    // API: 获取日志
+    // API
     if (url.pathname === "/admin/api/logs") {
       const id = url.searchParams.get('id');
       const m = url.searchParams.get('m') || dateKey;
       if (!env.db) return new Response("{}", {status: 500});
-      const { results } = await env.db.prepare("SELECT click_time FROM logs WHERE link_id = ? AND month_key = ? ORDER BY id DESC LIMIT 100").bind(id, m).all();
+      // 优化查询：按时间倒序
+      const { results } = await env.db.prepare("SELECT click_time FROM logs WHERE link_id = ? AND month_key = ? ORDER BY id DESC LIMIT 50").bind(id, m).all();
       return new Response(JSON.stringify(results || []), { headers: { "content-type": "application/json" } });
     }
 
-    // 路由: 管理后台
+    // 后台管理
     if (url.pathname === "/admin") {
       const cookie = request.headers.get('Cookie') || '';
-      
       if (request.method === 'POST') {
         const formData = await request.formData();
         if (formData.get('password') === ADMIN_PASS) {
           return new Response(null, { status: 302, headers: { 'Location': '/admin', 'Set-Cookie': `${COOKIE_NAME}=true; Path=/; Max-Age=86400; HttpOnly; SameSite=Strict` } });
         }
       }
-
-      if (!cookie.includes(`${COOKIE_NAME}=true`)) return new Response(renderLoginPageV8(TITLE, SHARED_BG_HTML, FONT_STACK, RAW_IMG), { headers: { "content-type": "text/html;charset=UTF-8" } });
+      if (!cookie.includes(`${COOKIE_NAME}=true`)) return new Response(renderLoginPageV10(TITLE, SHARED_BG_HTML, FONT_STACK, RAW_IMG), { headers: { "content-type": "text/html;charset=UTF-8" } });
 
       const selectedMonth = url.searchParams.get('m') || dateKey;
       const { results } = await env.db.prepare("SELECT * FROM stats ORDER BY total_clicks DESC").all();
-      return new Response(renderStatsHTMLV8(results || [], TITLE, selectedMonth, SHARED_BG_HTML, FONT_STACK, RAW_IMG), { headers: { "content-type": "text/html;charset=UTF-8" } });
+      return new Response(renderStatsHTMLV10(results || [], TITLE, selectedMonth, SHARED_BG_HTML, FONT_STACK, RAW_IMG), { headers: { "content-type": "text/html;charset=UTF-8" } });
     }
 
-    // 登出
     if (url.pathname === "/admin/logout") return new Response(null, { status: 302, headers: { 'Location': '/admin', 'Set-Cookie': `${COOKIE_NAME}=; Path=/; Max-Age=0` } });
 
     // 跳转逻辑
@@ -94,103 +87,110 @@ export async function onRequest(context) {
     }
 
     // 主页
-    return new Response(renderMainHTMLV8(TITLE, SUBTITLE, SHARED_BG_HTML, CONTACT_URL, LINKS_DATA, FRIENDS_DATA, FONT_STACK, RAW_IMG), { headers: { "content-type": "text/html;charset=UTF-8" } });
+    return new Response(renderMainHTMLV10(TITLE, SUBTITLE, SHARED_BG_HTML, CONTACT_URL, LINKS_DATA, FRIENDS_DATA, FONT_STACK, RAW_IMG), { headers: { "content-type": "text/html;charset=UTF-8" } });
 
   } catch (err) {
-    return new Response(`🚨 System Error: ${err.message}`, { status: 500 });
+    return new Response(`🚨 Error: ${err.message}`, { status: 500 });
   }
 }
 
 async function recordClick(db, id, name, type, y, m, timeStr) {
   try {
+    // 1. 写日志
     await db.prepare("INSERT INTO logs (link_id, click_time, month_key) VALUES (?, ?, ?)").bind(id, timeStr, m).run();
+    // 2. 更新统计 (确保 last_time 被更新)
     await db.prepare(`INSERT INTO stats (id, name, type, total_clicks, year_clicks, month_clicks, last_year, last_month, last_time) VALUES (?1, ?2, ?3, 1, 1, 1, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET total_clicks = total_clicks + 1, year_clicks = CASE WHEN last_year = ?4 THEN year_clicks + 1 ELSE 1 END, month_clicks = CASE WHEN last_month = ?5 THEN month_clicks + 1 ELSE 1 END, last_year = ?4, last_month = ?5, last_time = ?6, name = ?2`).bind(id, name, type, y, m, timeStr).run();
-  } catch (e) { console.error("DB Error", e); }
+  } catch (e) { console.error(e); }
 }
 
-/** --- 界面 V8: 极速预加载版 --- **/
+/** --- 界面 V10: 冰透高颜值版 --- **/
 
-// 通用 Head 注入：核心优化点
-const getPreloadHead = (title, fs, rawImg) => `
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>${title}</title>
-  ${rawImg ? `<link rel="preload" as="image" href="${rawImg}">` : ''}
-  <style>
-    body { margin: 0; min-height: 100vh; font-family: ${fs}; color: #fff; display: flex; justify-content: center; align-items: center; }
-  </style>
-`;
+const getHead = (t, fs, img) => `
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${t}</title>${img ? `<link rel="preload" as="image" href="${img}">` : ''}
+<style>
+  :root { --glass: rgba(15, 23, 42, 0.45); --border: rgba(255,255,255,0.18); --text-shadow: 0 2px 4px rgba(0,0,0,0.6); }
+  body { margin: 0; min-height: 100vh; font-family: ${fs}; color: #fff; display: flex; justify-content: center; align-items: center; -webkit-font-smoothing: antialiased; }
+  /* 通用卡片样式：冰透玻璃 */
+  .glass-panel { background: var(--glass); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid var(--border); box-shadow: 0 8px 32px rgba(0,0,0,0.2); border-radius: 20px; }
+  h1, h2, h3, div, span, a { text-shadow: var(--text-shadow); } /* 全局文字阴影保护 */
+</style>`;
 
-function renderMainHTMLV8(T, S, BG_HTML, C, L, F, FS, RAW_IMG) {
-  return `<!DOCTYPE html><html lang="zh-CN"><head>${getPreloadHead(T, FS, RAW_IMG)}<style>
+function renderMainHTMLV10(T, S, BG, C, L, F, FS, IMG) {
+  return `<!DOCTYPE html><html><head>${getHead(T, FS, IMG)}<style>
     .container { width: 90%; max-width: 680px; padding: 40px 0; }
-    header { background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(20px); padding: 40px; border-radius: 24px; text-align: center; margin-bottom: 30px; box-shadow: 0 20px 40px rgba(0,0,0,0.4); animation: fadeIn 0.6s ease-out; }
-    h1 { font-size: 2.2rem; margin: 0; background: linear-gradient(to right, #fff, #bae6fd); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 900; letter-spacing: -0.02em; text-shadow: 0 2px 10px rgba(0,0,0,0.5); }
-    .sub { color: #94a3b8; margin-top: 10px; font-weight: 500; font-size: 0.95rem; }
-    .label { font-size: 0.8rem; color: #a78bfa; margin: 25px 0 12px 5px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
+    header { padding: 40px; text-align: center; margin-bottom: 30px; border-radius: 24px; animation: fadeUp 0.6s ease; }
+    h1 { font-size: 2.4rem; margin: 0; font-weight: 800; letter-spacing: -0.03em; background: linear-gradient(180deg, #fff, #e2e8f0); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+    .sub { color: #e2e8f0; margin-top: 12px; font-weight: 500; font-size: 1rem; opacity: 0.9; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
-    .card { display: flex; height: 85px; background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(255,255,255,0.08); border-radius: 18px; overflow: hidden; transition: 0.3s; box-shadow: 0 4px 6px rgba(0,0,0,0.2); animation: slideUp 0.6s ease-out backwards; }
-    .card:hover { transform: translateY(-3px); border-color: #38bdf8; background: rgba(30, 41, 59, 0.8); box-shadow: 0 10px 25px rgba(56, 189, 248, 0.2); }
-    .link-main { flex: 1; display: flex; align-items: center; padding: 0 24px; text-decoration: none; color: #fff; }
-    .emoji { font-size: 1.8rem; margin-right: 18px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); }
-    .name { font-weight: 700; font-size: 1.1rem; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }
-    .note { font-size: 0.75rem; color: #fcd34d; margin-top: 4px; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,1); }
-    .link-sub { width: 50px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.2); border-left: 1px solid rgba(255,255,255,0.1); color: #cbd5e1; font-size: 0.75rem; writing-mode: vertical-lr; text-decoration: none; transition: 0.2s; }
-    .link-sub:hover { background: #38bdf8; color: #000; }
-    .f-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
-    .f-item { padding: 12px; background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: #e2e8f0; text-align: center; text-decoration: none; font-size: 0.9rem; transition: 0.2s; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
-    .f-item:hover { background: #a78bfa; color: #fff; border-color: #a78bfa; }
-    .btn { display: inline-block; margin-top: 40px; padding: 14px 40px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); border-radius: 50px; color: #fff; text-decoration: none; font-weight: 700; box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4); text-shadow: 0 1px 2px rgba(0,0,0,0.3); }
-    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-    @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-  </style></head><body>${BG_HTML}<div class="container"><header><h1>${T}</h1><div class="sub">${S}</div></header>
-    <div class="label">精选资源</div><div class="grid">${L.map((l,i)=>`<div class="card" style="animation-delay:${i*0.05}s"><a href="/go/${l.id}" class="link-main"><span class="emoji">${l.emoji}</span><div><div class="name">${l.name}</div><div class="note">⚠️ ${l.note}</div></div></a>${l.backup_url?`<a href="/go/${l.id}/backup" class="link-sub">备用</a>`:''}</div>`).join('')}</div>
-    ${F.length>0?`<div class="label">合作伙伴</div><div class="f-grid">${F.map((f,i)=>`<a href="/fgo/${i}" target="_blank" class="f-item">${f.name}</a>`).join('')}</div>`:''}
-    <div style="text-align:center"><a href="${C}" target="_blank" class="btn">💬 获取支持</a></div></div></body></html>`;
+    .card { display: flex; height: 85px; transition: 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); cursor: pointer; text-decoration: none; color: #fff; overflow: hidden; position: relative; animation: fadeUp 0.6s backwards; }
+    .card:hover { transform: translateY(-4px); background: rgba(30, 41, 59, 0.7); border-color: #a78bfa; box-shadow: 0 15px 30px rgba(0,0,0,0.25); }
+    .emoji { font-size: 2rem; margin: 0 20px; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3)); }
+    .info { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+    .name { font-weight: 700; font-size: 1.15rem; letter-spacing: -0.01em; }
+    .note { font-size: 0.75rem; color: #fcd34d; margin-top: 4px; font-weight: 700; display: flex; align-items: center; gap: 4px; }
+    .backup { width: 40px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.1); border-left: 1px solid var(--border); font-size: 0.7rem; writing-mode: vertical-lr; color: #cbd5e1; transition: 0.2s; }
+    .backup:hover { background: #8b5cf6; color: #fff; }
+    .f-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; margin-top: 10px; }
+    .f-item { padding: 12px; text-align: center; color: #cbd5e1; text-decoration: none; font-size: 0.9rem; transition: 0.2s; border-radius: 14px; }
+    .f-item:hover { background: rgba(255,255,255,0.15); color: #fff; transform: translateY(-2px); }
+    .btn { display: inline-block; padding: 14px 40px; background: #fff; color: #0f172a; border-radius: 50px; font-weight: 800; text-decoration: none; text-shadow: none; margin-top: 40px; transition: 0.3s; box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
+    .btn:hover { transform: scale(1.05); background: #f1f5f9; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+  </style></head><body>${BG}<div class="container"><header class="glass-panel"><h1>${T}</h1><div class="sub">${S}</div></header>
+    <div style="margin: 0 0 15px 5px; font-size: 0.8rem; font-weight: 800; color: #cbd5e1; text-transform: uppercase; letter-spacing: 1px; opacity:0.8">精选资源</div>
+    <div class="grid">${L.map((l,i)=>`<div class="glass-panel card" style="animation-delay:${i*0.04}s"><a href="/go/${l.id}" style="display:flex;flex:1;align-items:center;text-decoration:none;color:#fff"><span class="emoji">${l.emoji}</span><div class="info"><div class="name">${l.name}</div><div class="note"><svg width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M7.002 11a1 1 0 1 1 2 0 1 1 0 0 1-2 0zM7.1 4.995a.905.905 0 1 1 1.8 0l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 4.995z"/></svg>${l.note}</div></div></a>${l.backup_url?`<a href="/go/${l.id}/backup" class="backup">备用</a>`:''}</div>`).join('')}</div>
+    ${F.length>0?`<div style="margin: 30px 0 15px 5px; font-size: 0.8rem; font-weight: 800; color: #cbd5e1; text-transform: uppercase; letter-spacing: 1px; opacity:0.8">合作伙伴</div><div class="f-grid">${F.map(f=>`<a href="${f.url}" target="_blank" class="glass-panel f-item">${f.name}</a>`).join('')}</div>`:''}
+    <div style="text-align:center"><a href="${C}" class="btn">💬 联系支持</a></div></div></body></html>`;
 }
 
-function renderStatsHTMLV8(results, T, m, BG_HTML, FS, RAW_IMG) {
+function renderStatsHTMLV10(results, T, m, BG, FS, IMG) {
   const total = results.reduce((s, r) => s + (r.total_clicks || 0), 0);
-  return `<!DOCTYPE html><html lang="zh-CN"><head>${getPreloadHead(T, FS, RAW_IMG)}<style>
-    .main { flex: 1; padding: 40px 5%; max-width: 1200px; margin: 0 auto; }
-    .head-row { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 40px; padding-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); animation: fadeIn 0.8s; }
-    h1 { font-size: 2rem; margin: 0; font-weight: 800; color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
-    .badge { background: linear-gradient(135deg, #ec4899, #8b5cf6); padding: 15px 30px; border-radius: 16px; text-align: center; box-shadow: 0 10px 20px rgba(0,0,0,0.3); }
-    .badge-val { font-size: 2.5rem; font-weight: 900; line-height: 1; }
-    .filter-row { margin-bottom: 30px; display: flex; gap: 15px; align-items: center; }
-    select { background: rgba(15, 23, 42, 0.8); color: #fff; border: 1px solid #475569; padding: 10px 15px; border-radius: 10px; cursor: pointer; }
+  return `<!DOCTYPE html><html><head>${getHead(T, FS, IMG)}<style>
+    .main { width: 90%; max-width: 1000px; padding: 40px 0; }
+    .header { padding: 30px 40px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+    h1 { font-size: 1.8rem; margin: 0; font-weight: 800; }
+    .badge { background: #fff; color: #0f172a; padding: 10px 25px; border-radius: 16px; font-weight: 800; text-shadow: none; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
-    .card { background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(15px); border-radius: 20px; padding: 25px; transition: 0.2s; cursor: pointer; animation: slideUp 0.5s backwards; }
-    .card:hover { background: rgba(30, 41, 59, 0.9); border-color: #a78bfa; transform: translateY(-2px); }
-    .c-top { display: flex; justify-content: space-between; font-size: 0.8rem; color: #94a3b8; font-weight: 700; }
-    .c-title { font-size: 1.25rem; font-weight: 700; margin: 15px 0; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
-    .c-data { display: flex; justify-content: space-between; margin-bottom: 15px; font-size: 0.9rem; }
-    .highlight { color: #fcd34d; font-weight: 700; }
-    .bar-bg { height: 6px; background: rgba(0,0,0,0.3); border-radius: 3px; overflow: hidden; }
-    .bar-fill { height: 100%; background: #38bdf8; }
-    .c-time { font-size: 0.75rem; color: #cbd5e1; margin-top: 15px; text-align: right; font-family: monospace; }
-    .drawer { position: fixed; top: 0; right: -400px; width: 350px; height: 100vh; background: #0f172a; border-left: 1px solid #334155; box-shadow: -10px 0 30px rgba(0,0,0,0.5); transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1); z-index: 100; padding: 30px; overflow-y: auto; display: flex; flex-direction: column; }
-    .drawer.open { right: 0; }
-    .drawer h3 { margin: 0 0 20px 0; font-size: 1.2rem; border-bottom: 1px solid #334155; padding-bottom: 15px; }
-    .log-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #1e293b; font-size: 0.85rem; color: #cbd5e1; }
-    .log-time { font-family: monospace; color: #38bdf8; }
-    .close-btn { position: absolute; top: 20px; right: 20px; cursor: pointer; font-size: 1.5rem; color: #64748b; }
-    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-    @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-  </style></head><body>${BG_HTML}<div class="main">
-    <div class="head-row"><div><h1>数据中心</h1><p>周期: ${m}</p></div><div class="badge"><span>总点击</span><div class="badge-val">${total}</div></div></div>
-    <div class="filter-row"><select onchange="location.href='?m='+this.value"><option value="${m}">当前月份</option><option value="2025_12">2025_12</option></select><a href="/admin/logout" style="color:#ef4444;text-decoration:none;font-weight:700">退出登录</a></div>
-    <div class="grid">${results.map((r,i)=>{ const p=total>0?((r.total_clicks/total)*100).toFixed(1):0; return `<div class="card" onclick="showLogs('${r.id}', '${m}', '${r.name||r.id}')" style="animation-delay:${i*0.03}s"><div class="c-top"><span>#${r.type.toUpperCase()}</span><span>${p}%</span></div><div class="c-title">${r.name||r.id}</div><div class="c-data"><span>本月: <b class="highlight">${r.month_clicks}</b></span><span>年度: <b>${r.year_clicks}</b></span></div><div class="bar-bg"><div class="bar-fill" style="width:${p}%"></div></div><div class="c-time">最后点击: ${r.last_time||'无记录'}</div><div style="font-size:0.7rem;color:#94a3b8;margin-top:5px;text-align:right">👉 查看详情</div></div>`}).join('')}</div></div>
-    <div id="drawer" class="drawer"><div class="close-btn" onclick="closeDrawer()">×</div><h3 id="d-title">记录</h3><div id="d-list">加载中...</div></div><div id="mask" onclick="closeDrawer()" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:90;display:none;backdrop-filter:blur(2px)"></div>
-    <script>async function showLogs(id,m,n){document.getElementById('drawer').classList.add('open');document.getElementById('mask').style.display='block';document.getElementById('d-title').innerText=n;document.getElementById('d-list').innerHTML='<p>查询中...</p>';try{const r=await fetch(\`/admin/api/logs?id=\${id}&m=\${m}\`);const d=await r.json();document.getElementById('d-list').innerHTML=d.length?d.map((l,i)=>\`<div class="log-item"><span>#\${i+1}</span><span class="log-time">\${l.click_time}</span></div>\`).join(''):'<p>无详细记录</p>';}catch(e){document.getElementById('d-list').innerText='错误';}}function closeDrawer(){document.getElementById('drawer').classList.remove('open');document.getElementById('mask').style.display='none';}</script></body></html>`;
+    .card { padding: 25px; transition: 0.3s; position: relative; cursor: pointer; animation: fadeUp 0.5s backwards; }
+    .card:hover { transform: translateY(-3px); border-color: #a78bfa; background: rgba(30, 41, 59, 0.7); }
+    .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+    .title { font-size: 1.2rem; font-weight: 700; }
+    .data { font-family: 'SF Mono', Menlo, monospace; font-size: 0.9rem; color: #e2e8f0; }
+    .bar { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; margin: 15px 0; }
+    .fill { height: 100%; background: #a78bfa; border-radius: 3px; }
+    .time { font-size: 0.75rem; color: #94a3b8; text-align: right; font-family: monospace; opacity: 0.8; }
+    /* 抽屉 */
+    .drawer { position: fixed; top: 0; right: -420px; width: 380px; height: 100vh; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(30px); border-left: 1px solid var(--border); transition: 0.4s cubic-bezier(0.19, 1, 0.22, 1); z-index: 99; display: flex; flex-direction: column; }
+    .drawer.open { right: 0; box-shadow: -20px 0 50px rgba(0,0,0,0.5); }
+    .d-head { padding: 25px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2); }
+    .d-list { flex: 1; overflow-y: auto; padding: 0; margin: 0; list-style: none; }
+    .d-item { padding: 15px 25px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; font-size: 0.85rem; color: #cbd5e1; }
+    .d-item:hover { background: rgba(255,255,255,0.05); }
+    .time-tag { font-family: monospace; color: #a78bfa; }
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 90; opacity: 0; pointer-events: none; transition: 0.3s; }
+    .overlay.show { opacity: 1; pointer-events: auto; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+  </style></head><body>${BG}<div class="main"><header class="glass-panel header">
+    <div><h1>数据中心</h1><div style="font-size:0.9rem;opacity:0.8;margin-top:5px">周期: ${m}</div></div>
+    <div style="text-align:right"><div class="badge">总计 ${total} 次</div><a href="/admin/logout" style="display:block;margin-top:10px;color:#f87171;font-size:0.8rem;text-decoration:none;font-weight:700">安全退出</a></div>
+  </header>
+  <div class="grid">${results.map((r,i)=>{const p=total>0?((r.total_clicks/total)*100).toFixed(1):0; return `
+    <div class="glass-panel card" onclick="openLog('${r.id}','${m}','${r.name||r.id}')" style="animation-delay:${i*0.03}s">
+      <div class="row"><span style="font-size:0.75rem;font-weight:800;color:#cbd5e1;text-transform:uppercase">#${r.type}</span><span style="font-weight:700;color:#a78bfa">${p}%</span></div>
+      <div class="title">${r.name||r.id}</div>
+      <div class="data"><span>本月 <b style="color:#fff">${r.month_clicks}</b></span><span>年度 <b>${r.year_clicks}</b></span></div>
+      <div class="bar"><div class="fill" style="width:${p}%"></div></div>
+      <div class="time">🕒 ${r.last_time || '待记录'}</div>
+    </div>`}).join('')}</div></div>
+  <div class="overlay" id="mask" onclick="closeDrawer()"></div>
+  <div class="drawer" id="drawer"><div class="d-head"><h3 style="margin:0;font-size:1.1rem">详细记录</h3><button onclick="closeDrawer()" style="background:none;border:none;color:#fff;font-size:1.5rem;cursor:pointer">×</button></div><ul class="d-list" id="d-list"><li style="padding:25px;text-align:center;color:#94a3b8">加载中...</li></ul></div>
+  <script>
+    async function openLog(id,m,n){document.getElementById('drawer').classList.add('open');document.getElementById('mask').classList.add('show');document.querySelector('.d-head h3').innerText=n;const l=document.getElementById('d-list');l.innerHTML='<li style="padding:25px;text-align:center">📡 查询云端数据...</li>';try{const r=await fetch(\`/admin/api/logs?id=\${id}&m=\${m}\`);const d=await r.json();l.innerHTML=d.length?d.map((x,i)=>\`<li class="d-item"><span>#\${i+1}</span><span class="time-tag">\${x.click_time}</span></li>\`).join(''):'<li style="padding:25px;text-align:center;opacity:0.5">本月暂无点击</li>';}catch(e){l.innerHTML='<li style="padding:25px;text-align:center;color:#f87171">查询失败</li>';}}
+    function closeDrawer(){document.getElementById('drawer').classList.remove('open');document.getElementById('mask').classList.remove('show');}
+  </script></body></html>`;
 }
 
-function renderLoginPageV8(T, BG_HTML, FS, RAW_IMG) {
-  return `<!DOCTYPE html><html><head>${getPreloadHead(T, FS, RAW_IMG)}<style>
-    .card { background: rgba(30, 41, 59, 0.8); border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(20px); padding: 40px; border-radius: 24px; text-align: center; width: 320px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
-    h1 { background: linear-gradient(to right, #7dd3fc, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 30px; font-weight: 900; }
-    input { width: 100%; padding: 14px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; color: #fff; margin-bottom: 20px; outline: none; }
-    button { width: 100%; padding: 14px; background: #3b82f6; border: none; border-radius: 12px; color: #fff; font-weight: 700; cursor: pointer; transition: 0.2s; }
-    button:hover { background: #2563eb; transform: scale(1.02); }
-  </style></head><body>${BG_HTML}<div class="card"><h1>安全验证</h1><form method="POST"><input type="password" name="password" placeholder="密码..." required autofocus><button type="submit">进入后台</button></form></div></body></html>`;
+function renderLoginPageV10(T, BG, FS, IMG) {
+  return `<!DOCTYPE html><html><head>${getHead(T, FS, IMG)}<style>.login-box { padding: 50px; text-align: center; width: 320px; } input { width: 100%; padding: 15px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; color: #fff; margin-bottom: 20px; outline: none; transition: 0.3s; } input:focus { border-color: #a78bfa; background: rgba(0,0,0,0.4); } button { width: 100%; padding: 15px; background: #fff; color: #000; border: none; border-radius: 12px; font-weight: 800; cursor: pointer; transition: 0.3s; } button:hover { transform: scale(1.03); }</style></head><body>${BG}<div class="glass-panel login-box"><h1>${T}</h1><form method="POST"><input type="password" name="password" placeholder="输入口令..." required autofocus><button type="submit">进入后台</button></form></div></body></html>`;
 }
