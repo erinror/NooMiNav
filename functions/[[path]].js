@@ -6,8 +6,8 @@ export async function onRequest(context) {
   // --- 1. 配置区域 ---
   const TITLE = env.TITLE || "云端加速 · 精选导航";
   const SUBTITLE = env.SUBTITLE || "优质资源推荐 · 随时畅联";
-  const ADMIN_PASS = env.admin || "qwer1234"; 
-  const RAW_IMG = env.img || "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=2073"; // 默认给了一张图，防止没配置时太丑
+  const ADMIN_PASS = env.admin || "123456";  
+  const RAW_IMG = env.img || ""; 
   const BG_CSS = RAW_IMG ? `url('${RAW_IMG}')` : 'none';
   const CONTACT_URL = env.CONTACT_URL || "https://t.me/Fuzzy_Fbot";
 
@@ -23,7 +23,7 @@ export async function onRequest(context) {
   const dateKey = `${currYear}_${currMonth}`;
   const fullTimeStr = now.toISOString().replace('T', ' ').substring(0, 19);
 
-  // 后台/通用背景逻辑 (仅后台使用旧版背景逻辑，前台用新CSS)
+  // 背景逻辑
   const SHARED_BG_HTML = `
     <div style="position:fixed;inset:0;background:#1e293b;z-index:-3;"></div>
     <div class="bg-img" style="position:fixed;inset:0;background:${BG_CSS} center/cover;z-index:-2;opacity:0;transition:opacity 0.5s ease-in;"></div>
@@ -38,17 +38,18 @@ export async function onRequest(context) {
   const FONT_STACK = `'SF Pro Display', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
 
   try {
-    // API
+    // API 查询
     if (url.pathname === "/admin/api/logs") {
       const id = url.searchParams.get('id');
       const m = url.searchParams.get('m') || dateKey;
       if (!env.db) return new Response("{}", {status: 500});
+      
       // 优化查询：按时间倒序
       const { results } = await env.db.prepare("SELECT click_time FROM logs WHERE link_id = ? AND month_key = ? ORDER BY id DESC LIMIT 50").bind(id, m).all();
       return new Response(JSON.stringify(results || []), { headers: { "content-type": "application/json" } });
     }
 
-    // 后台管理 (保持原有逻辑不变)
+    // 后台管理
     if (url.pathname === "/admin") {
       const cookie = request.headers.get('Cookie') || '';
       if (request.method === 'POST') {
@@ -64,9 +65,10 @@ export async function onRequest(context) {
       return new Response(renderStatsHTMLV10(results || [], TITLE, selectedMonth, SHARED_BG_HTML, FONT_STACK, RAW_IMG), { headers: { "content-type": "text/html;charset=UTF-8" } });
     }
 
+    // 退出登录
     if (url.pathname === "/admin/logout") return new Response(null, { status: 302, headers: { 'Location': '/admin', 'Set-Cookie': `${COOKIE_NAME}=; Path=/; Max-Age=0` } });
 
-    // 跳转逻辑 (保持不变，用于统计)
+    // 跳转逻辑
     if (url.pathname.startsWith("/go/")) {
       const id = url.pathname.split("/")[2];
       const isBackup = url.pathname.split("/")[3] === "backup";
@@ -86,8 +88,8 @@ export async function onRequest(context) {
       }
     }
 
-    // --- 主页渲染 (已替换为新UI) ---
-    return new Response(renderNewNavHTML(TITLE, SUBTITLE, RAW_IMG, CONTACT_URL, LINKS_DATA, FRIENDS_DATA), { headers: { "content-type": "text/html;charset=UTF-8" } });
+    // 主页
+    return new Response(renderMainHTMLV10(TITLE, SUBTITLE, SHARED_BG_HTML, CONTACT_URL, LINKS_DATA, FRIENDS_DATA, FONT_STACK, RAW_IMG), { headers: { "content-type": "text/html;charset=UTF-8" } });
 
   } catch (err) {
     return new Response(`🚨 Error: ${err.message}`, { status: 500 });
@@ -96,165 +98,14 @@ export async function onRequest(context) {
 
 async function recordClick(db, id, name, type, y, m, timeStr) {
   try {
+    // 1. 写日志
     await db.prepare("INSERT INTO logs (link_id, click_time, month_key) VALUES (?, ?, ?)").bind(id, timeStr, m).run();
+    // 2. 更新统计
     await db.prepare(`INSERT INTO stats (id, name, type, total_clicks, year_clicks, month_clicks, last_year, last_month, last_time) VALUES (?1, ?2, ?3, 1, 1, 1, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET total_clicks = total_clicks + 1, year_clicks = CASE WHEN last_year = ?4 THEN year_clicks + 1 ELSE 1 END, month_clicks = CASE WHEN last_month = ?5 THEN month_clicks + 1 ELSE 1 END, last_year = ?4, last_month = ?5, last_time = ?6, name = ?2`).bind(id, name, type, y, m, timeStr).run();
   } catch (e) { console.error(e); }
 }
 
-/** * ✨ 全新 NAV 界面渲染函数
- * 完全替换了旧版 renderMainHTMLV10
- */
-function renderNewNavHTML(TITLE, SUBTITLE, BG_IMG_URL, CONTACT, LINKS, FRIENDS) {
-  // 生成资源卡片 HTML
-  const cardsHtml = LINKS.map(item => {
-    // 主链接
-    const mainUrl = `/go/${item.id}`;
-    // 备用链接 (如果有)
-    const backupHtml = item.backup_url 
-      ? `<a href="/go/${item.id}/backup" class="tag-backup" title="点击跳转备用线路">备用</a>` 
-      : '';
-    
-    return `
-    <div class="glass-card resource-card-wrap">
-        <a href="${mainUrl}" class="resource-main-link">
-            <div class="card-icon">${item.emoji}</div>
-            <div class="card-info">
-                <h3>${item.name}</h3>
-                <p>
-                    <svg width="12" height="12" fill="currentColor" viewBox="0 0 16 16" style="margin-right:4px"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M7.002 11a1 1 0 1 1 2 0 1 1 0 0 1-2 0zM7.1 4.995a.905.905 0 1 1 1.8 0l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 4.995z"/></svg>
-                    ${item.note}
-                </p>
-            </div>
-        </a>
-        ${backupHtml}
-    </div>
-    `;
-  }).join('');
-
-  // 生成友链 HTML
-  const friendsHtml = FRIENDS.map((f, i) => 
-    `<a href="/fgo/${i}" target="_blank" class="glass-card partner-card">${f.name}</a>`
-  ).join('');
-
-  return `
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${TITLE}</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            color: #ffffff;
-            background: url('${BG_IMG_URL}') no-repeat center center fixed;
-            background-size: cover;
-            min-height: 100vh;
-            display: flex; flex-direction: column; align-items: center;
-            padding: 40px 20px 100px;
-        }
-        body::before { content: ''; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(15, 23, 42, 0.4); z-index: -1; }
-        
-        .container { width: 100%; max-width: 800px; margin: 0 auto; }
-        
-        /* 玻璃拟态基础类 */
-        .glass-card {
-            background: rgba(255, 255, 255, 0.15);
-            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 20px;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
-            transition: transform 0.2s, background 0.2s;
-        }
-
-        /* 头部 */
-        .header { text-align: center; padding: 40px 20px; margin-bottom: 30px; }
-        .header h1 { font-size: 3rem; font-weight: 800; letter-spacing: 2px; text-shadow: 0 4px 15px rgba(0,0,0,0.3); margin-bottom: 10px; }
-        .header p { font-size: 1.1rem; opacity: 0.9; font-weight: 400; letter-spacing: 1px; }
-
-        /* 分区标题 */
-        .section-title { font-size: 1rem; font-weight: 700; color: #7dd3fc; margin-bottom: 15px; margin-left: 5px; display: flex; align-items: center; gap: 6px; text-transform: uppercase; letter-spacing: 1px; }
-
-        /* 资源网格 */
-        .grid-resources { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-bottom: 40px; }
-        
-        /* 单个资源卡片容器 */
-        .resource-card-wrap {
-            display: flex; position: relative; overflow: hidden;
-            padding: 0; /* 内部布局自己控制padding */
-        }
-        .resource-card-wrap:hover { background: rgba(255, 255, 255, 0.25); transform: translateY(-3px); }
-
-        /* 卡片主体点击区域 */
-        .resource-main-link {
-            flex: 1; display: flex; align-items: center; text-decoration: none; color: white; padding: 20px;
-        }
-        .card-icon { font-size: 2.5rem; margin-right: 15px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); }
-        .card-info h3 { font-size: 1.2rem; font-weight: 700; margin-bottom: 4px; }
-        .card-info p { font-size: 0.85rem; color: #fcd34d; font-weight: 500; display: flex; align-items: center; gap: 4px; }
-
-        /* 备用标签 */
-        .tag-backup {
-            width: 36px;
-            background: rgba(0, 0, 0, 0.2);
-            border-left: 1px solid rgba(255, 255, 255, 0.1);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 0.75rem; color: #e2e8f0;
-            writing-mode: vertical-rl; letter-spacing: 2px;
-            text-decoration: none; transition: 0.2s;
-            cursor: pointer;
-        }
-        .tag-backup:hover { background: #8b5cf6; color: white; }
-
-        /* 合作伙伴网格 */
-        .grid-partners { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 40px; }
-        .partner-card { text-decoration: none; color: rgba(255, 255, 255, 0.9); text-align: center; padding: 15px 10px; font-size: 0.9rem; border-radius: 12px; }
-        .partner-card:hover { background: rgba(255, 255, 255, 0.25); transform: translateY(-2px); color: #fff; }
-
-        /* 底部悬浮按钮 */
-        .fab-support {
-            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
-            background: linear-gradient(135deg, #8b5cf6, #a855f7); color: white;
-            padding: 12px 30px; border-radius: 50px; text-decoration: none; font-weight: bold;
-            box-shadow: 0 10px 25px rgba(139, 92, 246, 0.5); display: flex; align-items: center; gap: 8px;
-            transition: transform 0.2s, box-shadow 0.2s; z-index: 100;
-        }
-        .fab-support:hover { transform: translateX(-50%) scale(1.05); box-shadow: 0 15px 35px rgba(139, 92, 246, 0.6); }
-
-        @media (max-width: 600px) {
-            .header h1 { font-size: 2.5rem; }
-            .grid-resources { grid-template-columns: 1fr; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header glass-card">
-            <h1>${TITLE}</h1>
-            <p>${SUBTITLE}</p>
-        </div>
-
-        <div class="section-title">💎 精选资源</div>
-        <div class="grid-resources">
-            ${cardsHtml}
-        </div>
-
-        <div class="section-title">🔗 合作伙伴</div>
-        <div class="grid-partners">
-            ${friendsHtml}
-        </div>
-    </div>
-
-    <a href="${CONTACT}" class="fab-support">
-        💬 获取支持
-    </a>
-</body>
-</html>
-  `;
-}
-
-// --- 下面是后台和登录页的渲染函数，保持原样即可 (为了节省字数，这里引用你原来的函数名) ---
+/** --- 界面V10 --- **/
 
 const getHead = (t, fs, img) => `
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -263,14 +114,39 @@ const getHead = (t, fs, img) => `
   :root { --glass: rgba(15, 23, 42, 0.45); --border: rgba(255,255,255,0.18); --text-shadow: 0 2px 4px rgba(0,0,0,0.6); }
   body { margin: 0; min-height: 100vh; font-family: ${fs}; color: #fff; display: flex; justify-content: center; align-items: center; -webkit-font-smoothing: antialiased; }
   .glass-panel { background: var(--glass); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid var(--border); box-shadow: 0 8px 32px rgba(0,0,0,0.2); border-radius: 20px; }
-  h1, h2, h3, div, span, a { text-shadow: var(--text-shadow); } 
+  h1, h2, h3, div, span, a { text-shadow: var(--text-shadow); }
 </style>`;
 
+function renderMainHTMLV10(T, S, BG, C, L, F, FS, IMG) {
+  return `<!DOCTYPE html><html><head>${getHead(T, FS, IMG)}<style>
+    .container { width: 90%; max-width: 680px; padding: 40px 0; }
+    header { padding: 40px; text-align: center; margin-bottom: 30px; border-radius: 24px; animation: fadeUp 0.6s ease; }
+    h1 { font-size: 2.4rem; margin: 0; font-weight: 800; letter-spacing: -0.03em; background: linear-gradient(180deg, #fff, #e2e8f0); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+    .sub { color: #e2e8f0; margin-top: 12px; font-weight: 500; font-size: 1rem; opacity: 0.9; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+    .card { display: flex; height: 85px; transition: 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); cursor: pointer; text-decoration: none; color: #fff; overflow: hidden; position: relative; animation: fadeUp 0.6s backwards; }
+    .card:hover { transform: translateY(-4px); background: rgba(30, 41, 59, 0.7); border-color: #a78bfa; box-shadow: 0 15px 30px rgba(0,0,0,0.25); }
+    .emoji { font-size: 2rem; margin: 0 20px; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3)); }
+    .info { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+    .name { font-weight: 700; font-size: 1.15rem; letter-spacing: -0.01em; }
+    .note { font-size: 0.75rem; color: #fcd34d; margin-top: 4px; font-weight: 700; display: flex; align-items: center; gap: 4px; }
+    .backup { width: 40px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.1); border-left: 1px solid var(--border); font-size: 0.7rem; writing-mode: vertical-lr; color: #cbd5e1; transition: 0.2s; }
+    .backup:hover { background: #8b5cf6; color: #fff; }
+    .f-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; margin-top: 10px; }
+    .f-item { padding: 12px; text-align: center; color: #cbd5e1; text-decoration: none; font-size: 0.9rem; transition: 0.2s; border-radius: 14px; }
+    .f-item:hover { background: rgba(255,255,255,0.15); color: #fff; transform: translateY(-2px); }
+    .btn { display: inline-block; padding: 14px 40px; background: #fff; color: #0f172a; border-radius: 50px; font-weight: 800; text-decoration: none; text-shadow: none; margin-top: 40px; transition: 0.3s; box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
+    .btn:hover { transform: scale(1.05); background: #f1f5f9; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+  </style></head><body>${BG}<div class="container"><header class="glass-panel"><h1>${T}</h1><div class="sub">${S}</div></header>
+    <div style="margin: 0 0 15px 5px; font-size: 0.8rem; font-weight: 800; color: #cbd5e1; text-transform: uppercase; letter-spacing: 1px; opacity:0.8">精选资源</div>
+    <div class="grid">${L.map((l,i)=>`<div class="glass-panel card" style="animation-delay:${i*0.04}s"><a href="/go/${l.id}" style="display:flex;flex:1;align-items:center;text-decoration:none;color:#fff"><span class="emoji">${l.emoji}</span><div class="info"><div class="name">${l.name}</div><div class="note"><svg width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M7.002 11a1 1 0 1 1 2 0 1 1 0 0 1-2 0zM7.1 4.995a.905.905 0 1 1 1.8 0l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 4.995z"/></svg>${l.note}</div></div></a>${l.backup_url?`<a href="/go/${l.id}/backup" class="backup">备用</a>`:''}</div>`).join('')}</div>
+    ${F.length>0?`<div style="margin: 30px 0 15px 5px; font-size: 0.8rem; font-weight: 800; color: #cbd5e1; text-transform: uppercase; letter-spacing: 1px; opacity:0.8">合作伙伴</div><div class="f-grid">${F.map(f=>`<a href="${f.url}" target="_blank" class="glass-panel f-item">${f.name}</a>`).join('')}</div>`:''}
+    <div style="text-align:center"><a href="${C}" class="btn">💬 联系支持</a></div></div></body></html>`;
+}
+
+// 后台统计页面
 function renderStatsHTMLV10(results, T, m, BG, FS, IMG) {
-  // ... 这里是你原来的统计页代码，我没改动，为了代码简洁我直接省略了内部细节 ...
-  // 如果你复制时发现这部分缺失，请保留你原始代码中 renderStatsHTMLV10 函数的完整内容
-  // 为了方便，我下面直接贴出简化的完整版，确保你能直接运行
-  
   const total = results.reduce((s, r) => s + (r.total_clicks || 0), 0);
   return `<!DOCTYPE html><html><head>${getHead(T, FS, IMG)}<style>
     .main { width: 90%; max-width: 1000px; padding: 40px 0; }
@@ -314,8 +190,4 @@ function renderStatsHTMLV10(results, T, m, BG, FS, IMG) {
     async function openLog(id,m,n){document.getElementById('drawer').classList.add('open');document.getElementById('mask').classList.add('show');document.querySelector('.d-head h3').innerText=n;const l=document.getElementById('d-list');l.innerHTML='<li style="padding:25px;text-align:center">📡 查询云端数据...</li>';try{const r=await fetch(\`/admin/api/logs?id=\${id}&m=\${m}\`);const d=await r.json();l.innerHTML=d.length?d.map((x,i)=>\`<li class="d-item"><span>#\${i+1}</span><span class="time-tag">\${x.click_time}</span></li>\`).join(''):'<li style="padding:25px;text-align:center;opacity:0.5">本月暂无点击</li>';}catch(e){l.innerHTML='<li style="padding:25px;text-align:center;color:#f87171">查询失败</li>';}}
     function closeDrawer(){document.getElementById('drawer').classList.remove('open');document.getElementById('mask').classList.remove('show');}
   </script></body></html>`;
-}
-
-function renderLoginPageV10(T, BG, FS, IMG) {
-  return `<!DOCTYPE html><html><head>${getHead(T, FS, IMG)}<style>.login-box { padding: 50px; text-align: center; width: 320px; } input { width: 100%; padding: 15px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; color: #fff; margin-bottom: 20px; outline: none; transition: 0.3s; } input:focus { border-color: #a78bfa; background: rgba(0,0,0,0.4); } button { width: 100%; padding: 15px; background: #fff; color: #000; border: none; border-radius: 12px; font-weight: 800; cursor: pointer; transition: 0.3s; } button:hover { transform: scale(1.03); }</style></head><body>${BG}<div class="glass-panel login-box"><h1>${T}</h1><form method="POST"><input type="password" name="password" placeholder="输入口令..." required autofocus><button type="submit">进入后台</button></form></div></body></html>`;
 }
