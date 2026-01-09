@@ -48,19 +48,16 @@ export async function onRequest(context) {
     // --- 后台管理页面 ---
     if (url.pathname === "/admin") {
       const cookie = request.headers.get('Cookie') || '';
-      // 登录验证
       if (request.method === 'POST') {
         const formData = await request.formData();
         if (formData.get('password') === ADMIN_PASS) {
           return new Response(null, { status: 302, headers: { 'Location': '/admin', 'Set-Cookie': `${COOKIE_NAME}=true; Path=/; Max-Age=86400; HttpOnly; SameSite=Strict` } });
         }
       }
-      // 未登录 -> 显示美化后的登录页
       if (!cookie.includes(`${COOKIE_NAME}=true`)) return new Response(renderLoginPageV10(TITLE, SHARED_BG_HTML, FONT_STACK, RAW_IMG), { headers: { "content-type": "text/html;charset=UTF-8" } });
 
       const selectedMonth = url.searchParams.get('m') || dateKey;
       
-      // 获取统计数据
       const { results } = await env.db.prepare("SELECT * FROM stats").all();
       const statsMap = new Map();
       if(results) results.forEach(r => statsMap.set(r.id, r));
@@ -146,10 +143,15 @@ function renderNewNavHTML(TITLE, SUBTITLE, BG_IMG_URL, CONTACT, LINKS, FRIENDS) 
     .fab-support { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, #8b5cf6, #a855f7); color: white; padding: 12px 30px; border-radius: 50px; text-decoration: none; font-weight: bold; box-shadow: 0 10px 25px rgba(139, 92, 246, 0.5); z-index: 100; transition: 0.2s; }
     .fab-support:hover { transform: translateX(-50%) scale(1.05); }
     @media (max-width: 600px) { .header h1 { font-size: 2.5rem; } .grid-resources { grid-template-columns: 1fr; } }
-  </style></head><body><div class="container"><div class="header glass-card"><h1>${TITLE}</h1><p>${SUBTITLE}</p></div><div class="section-title">💎 精选资源</div><div class="grid-resources">${cardsHtml}</div><div class="section-title">🔗 合作伙伴</div><div class="grid-partners">${friendsHtml}</div></div><a href="${CONTACT}" class="fab-support">💬 获取支持</a></body></html>`;
+  </style></head><body><div class="container"><div class="header glass-card"><h1>${TITLE}</h1><p>${SUBTITLE}</p></div><div class="section-title">💎 精选</div><div class="grid-resources">${cardsHtml}</div><div class="section-title">🔗 友链</div><div class="grid-partners">${friendsHtml}</div></div><a href="${CONTACT}" class="fab-support">💬 获取支持</a></body></html>`;
 }
 
-/** * ✨ 管理后台渲染 */
+/** * ✨ 管理后台 - 高清晰度美化版
+ * 优化：
+ * 1. 标题居中，整体上移
+ * 2. 背景不纯黑，改用深蓝灰+高强度模糊，文字对比度极高
+ * 3. 自动换行Grid，链接再多也不怕
+ */
 function renderAdminDashboard(LINKS, FRIENDS, statsMap, T, m, BG, FS, IMG) {
   let totalClicks = 0;
   for (let v of statsMap.values()) totalClicks += (v.total_clicks || 0);
@@ -157,31 +159,31 @@ function renderAdminDashboard(LINKS, FRIENDS, statsMap, T, m, BG, FS, IMG) {
   const resourceHtml = LINKS.map((item, i) => {
     const stat = statsMap.get(item.id) || { total_clicks: 0, month_clicks: 0, year_clicks: 0, last_time: '' };
     const p = totalClicks > 0 ? ((stat.total_clicks / totalClicks) * 100).toFixed(1) : 0;
-    // 修复：安全读取时间
     const timeDisplay = stat.last_time ? stat.last_time : '暂无记录';
     
     return `
     <div class="glass-panel card" onclick="openLog('${item.id}','${m}','${item.name}')" style="animation-delay:${i * 0.05}s">
-        <div class="row">
-            <div style="display:flex;align-items:center;gap:10px;">
+        <div class="row top-row">
+            <div style="display:flex;align-items:center;gap:12px;">
                 <span class="emoji-small">${item.emoji}</span>
                 <span class="card-name">${item.name}</span>
             </div>
-            <span class="percent">${p}%</span>
+            <div class="percent-badge">${p}%</div>
         </div>
         <div class="data-row">
-            <span>本月 <b class="highlight">${stat.month_clicks}</b></span>
-            <span>总计 <b>${stat.total_clicks}</b></span>
+            <div class="data-item"><span class="label">本月</span><b class="val-highlight">${stat.month_clicks}</b></div>
+            <div class="data-item"><span class="label">总计</span><b class="val-total">${stat.total_clicks}</b></div>
         </div>
-        <div class="bar"><div class="fill" style="width:${p}%"></div></div>
-        <div class="time">🕒 ${timeDisplay}</div>
+        <div class="bar-bg"><div class="bar-fill" style="width:${p}%"></div></div>
+        <div class="time-row">
+            🕒 ${timeDisplay}
+        </div>
     </div>`;
   }).join('');
 
   const friendHtml = FRIENDS.map((item, i) => {
     const id = `friend_${i}`; 
     const stat = statsMap.get(id) || { total_clicks: 0, month_clicks: 0, year_clicks: 0, last_time: '' };
-    // 修复：安全读取时间，且防止 split 报错
     let simpleTime = '-';
     if (stat.last_time && stat.last_time.includes(' ')) {
         simpleTime = stat.last_time.split(' ')[1];
@@ -189,52 +191,97 @@ function renderAdminDashboard(LINKS, FRIENDS, statsMap, T, m, BG, FS, IMG) {
 
     return `
     <div class="glass-panel card-mini" onclick="openLog('${id}','${m}','${item.name}')">
-        <div class="row-mini">
+        <div class="mini-header">
             <span class="card-name-mini">${item.name}</span>
-            <span class="percent-mini">${stat.total_clicks}次</span>
+            <span class="mini-badge">${stat.total_clicks}</span>
         </div>
-        <div class="time-mini">${simpleTime}</div>
+        <div class="mini-time">${simpleTime}</div>
     </div>`;
   }).join('');
 
   return `<!DOCTYPE html><html><head>${getHead(T, FS, IMG)}<style>
-    .main { width: 90%; max-width: 900px; padding: 40px 0; }
-    .header { padding: 30px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
-    .section-label { color: #7dd3fc; font-weight: 800; margin: 30px 0 15px 5px; text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 2px 4px rgba(0,0,0,0.6); }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; }
-    .grid-mini { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
-    .card { padding: 20px; cursor: pointer; transition: 0.2s; animation: fadeUp 0.5s backwards; }
-    .card:hover { transform: translateY(-3px); background: rgba(30, 41, 59, 0.8); border-color: #a78bfa; }
-    .emoji-small { font-size: 1.5rem; }
-    .card-name { font-weight: 700; font-size: 1.1rem; }
-    .percent { font-weight: 700; color: #a78bfa; }
-    .data-row { display: flex; justify-content: space-between; margin: 15px 0 10px; font-size: 0.9rem; color: #cbd5e1; }
-    .highlight { color: #fff; }
-    .bar { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; }
-    .fill { height: 100%; background: #a78bfa; }
-    .time { font-size: 0.75rem; color: #94a3b8; text-align: right; margin-top: 10px; font-family: monospace; }
-    .card-mini { padding: 15px; cursor: pointer; transition: 0.2s; }
-    .card-mini:hover { background: rgba(30, 41, 59, 0.8); border-color: #a78bfa; }
-    .row-mini { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 5px; }
-    .card-name-mini { font-weight: 600; }
-    .percent-mini { color: #a78bfa; font-weight: 700; }
-    .time-mini { font-size: 0.7rem; color: #64748b; text-align: right; font-family: monospace; }
-    .badge { background: #fff; color: #0f172a; padding: 8px 20px; border-radius: 12px; font-weight: 800; }
-    .drawer { position: fixed; top: 0; right: -420px; width: 380px; height: 100vh; background: rgba(15, 23, 42, 0.98); border-left: 1px solid var(--border); transition: 0.4s cubic-bezier(0.19, 1, 0.22, 1); z-index: 99; display: flex; flex-direction: column; }
-    .drawer.open { right: 0; box-shadow: -20px 0 50px rgba(0,0,0,0.5); }
+    /* 1. 布局优化 */
+    .main { width: 94%; max-width: 1000px; padding: 20px 0; margin-bottom: 50px; } /* 减少顶部Padding，往上走 */
+    
+    /* 2. 标题居中与背景优化 */
+    .header { 
+        padding: 30px; 
+        text-align: center; /* 标题居中 */
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px;
+        margin-bottom: 30px; 
+        background: rgba(30, 41, 59, 0.65); /* 稍微偏蓝灰，不是死黑 */
+        backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(255,255,255,0.15);
+    }
+    
+    /* 3. 卡片通用样式 (清晰度优化) */
+    .glass-panel { 
+        background: rgba(30, 41, 59, 0.75); /* 加深底色，保证文字清晰 */
+        backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); 
+        border: 1px solid rgba(255,255,255,0.1); 
+        box-shadow: 0 8px 32px rgba(0,0,0,0.3); 
+        border-radius: 16px; 
+        transition: 0.2s;
+    }
+
+    /* 4. 网格布局 (无限对齐，不会显示不全) */
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+    .grid-mini { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+
+    /* 文字与细节 */
+    h1, div, span { text-shadow: 0 1px 2px rgba(0,0,0,0.8); } /* 文字加阴影，防背景干扰 */
+    
+    .card { padding: 20px; cursor: pointer; animation: fadeUp 0.5s backwards; }
+    .card:hover { transform: translateY(-3px); border-color: #a78bfa; background: rgba(30, 41, 59, 0.9); }
+    
+    .top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+    .emoji-small { font-size: 1.6rem; }
+    .card-name { font-weight: 700; font-size: 1.1rem; color: #fff; }
+    .percent-badge { font-weight: 800; color: #a78bfa; background: rgba(167, 139, 250, 0.1); padding: 4px 8px; border-radius: 6px; font-size: 0.85rem; }
+    
+    .data-row { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 0.9rem; color: #cbd5e1; }
+    .val-highlight { color: #38bdf8; margin-left: 6px; font-size: 1.1em; }
+    .val-total { color: #fff; margin-left: 6px; font-size: 1.1em; }
+    
+    .bar-bg { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; margin-bottom: 10px; }
+    .bar-fill { height: 100%; background: linear-gradient(90deg, #38bdf8, #a78bfa); border-radius: 2px; }
+    
+    .time-row { font-size: 0.75rem; color: #94a3b8; text-align: right; font-family: monospace; display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+
+    /* 迷你卡片 */
+    .card-mini { padding: 15px; cursor: pointer; }
+    .card-mini:hover { border-color: #38bdf8; background: rgba(30, 41, 59, 0.9); }
+    .mini-header { display: flex; justify-content: space-between; margin-bottom: 6px; }
+    .card-name-mini { font-weight: 600; font-size: 0.95rem; }
+    .mini-badge { color: #38bdf8; font-weight: 700; }
+    .mini-time { font-size: 0.75rem; color: #64748b; text-align: right; font-family: monospace; }
+
+    /* 抽屉 & 其他 */
+    .badge { background: #fff; color: #0f172a; padding: 6px 18px; border-radius: 20px; font-weight: 800; font-size: 0.9rem; }
+    .section-label { color: #7dd3fc; font-weight: 800; margin: 35px 0 15px 5px; text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 2px 4px rgba(0,0,0,0.8); }
+    .drawer { position: fixed; top: 0; right: -420px; width: 380px; height: 100vh; background: rgba(15, 23, 42, 0.98); border-left: 1px solid rgba(255,255,255,0.1); transition: 0.4s cubic-bezier(0.19, 1, 0.22, 1); z-index: 99; display: flex; flex-direction: column; }
+    .drawer.open { right: 0; box-shadow: -20px 0 50px rgba(0,0,0,0.6); }
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 90; opacity: 0; pointer-events: none; transition: 0.3s; }
     .overlay.show { opacity: 1; pointer-events: auto; }
     @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
   </style></head><body>${BG}<div class="main">
     <header class="glass-panel header">
-        <div><h1>数据看板</h1><div style="font-size:0.85rem;opacity:0.7;margin-top:5px">当前周期: ${m}</div></div>
-        <div style="text-align:right"><div class="badge">总点击: ${totalClicks}</div><a href="/admin/logout" style="display:block;margin-top:10px;color:#f87171;font-size:0.8rem;text-decoration:none;font-weight:700">安全退出</a></div>
+        <h1 style="margin:0;font-size:2rem">📊 数据看板</h1>
+        <div style="display:flex;gap:15px;align-items:center;">
+             <span style="font-family:monospace;opacity:0.8">${m}</span>
+             <span class="badge">总点击 ${totalClicks}</span>
+        </div>
+        <a href="/admin/logout" style="color:#f87171;font-size:0.85rem;text-decoration:none;font-weight:700;margin-top:5px">安全退出</a>
     </header>
-    <div class="section-label">💎 精选资源数据</div>
+
+    <div class="section-label">💎 精选数据</div>
     <div class="grid">${resourceHtml}</div>
-    <div class="section-label">🔗 合作伙伴数据</div>
+
+    <div class="section-label">🔗 友链数据</div>
     <div class="grid-mini">${friendHtml}</div>
+
   </div>
+  
   <div class="overlay" id="mask" onclick="closeDrawer()"></div>
   <div class="drawer" id="drawer">
       <div style="padding:20px;border-bottom:1px solid rgba(255,255,255,0.1);display:flex;justify-content:space-between;align-items:center;">
@@ -243,6 +290,7 @@ function renderAdminDashboard(LINKS, FRIENDS, statsMap, T, m, BG, FS, IMG) {
       </div>
       <ul style="flex:1;overflow-y:auto;padding:0;margin:0;list-style:none;" id="d-list"></ul>
   </div>
+
   <script>
     async function openLog(id,m,n){
         document.getElementById('drawer').classList.add('open');
@@ -260,7 +308,7 @@ function renderAdminDashboard(LINKS, FRIENDS, statsMap, T, m, BG, FS, IMG) {
   </script></body></html>`;
 }
 
-/** * ✨ 登录页美化 (玻璃拟态 + 背景图) */
+// 登录页 & Head (通用)
 const getHead = (t, fs, img) => `<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${t}</title><style>:root{--glass:rgba(15,23,42,0.6);--border:rgba(255,255,255,0.15);--text-shadow:0 2px 4px rgba(0,0,0,0.8)}body{margin:0;min-height:100vh;font-family:${fs};color:#fff;display:flex;justify-content:center;align-items:center}.glass-panel{background:var(--glass);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--border);box-shadow:0 8px 32px rgba(0,0,0,0.2);border-radius:16px}h1,div,span,a{text-shadow:var(--text-shadow)}</style>`;
 function renderLoginPageV10(T, BG, FS, IMG) {
   return `<!DOCTYPE html><html><head>${getHead(T, FS, IMG)}<style>
