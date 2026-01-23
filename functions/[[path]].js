@@ -67,7 +67,7 @@ export async function onRequest(context) {
 
     if (url.pathname === "/admin/logout") return new Response(null, { status: 302, headers: { 'Location': '/admin', 'Set-Cookie': `${COOKIE_NAME}=; Path=/; Max-Age=0` } });
 
-    // --- 跳转逻辑 ---
+    // --- 主链接跳转逻辑 ---
     if (url.pathname.startsWith("/go/")) {
       const id = url.pathname.split("/")[2];
       const isBackup = url.pathname.split("/")[3] === "backup";
@@ -78,11 +78,15 @@ export async function onRequest(context) {
       }
     }
 
+    // --- 友链跳转逻辑 (已修改为 ID 模式) ---
     if (url.pathname.startsWith("/fgo/")) {
-      const idx = parseInt(url.pathname.split("/")[2]);
-      const friend = FRIENDS_DATA[idx];
+      // 以前是取 index，现在直接取 ID
+      const fid = url.pathname.split("/")[2]; 
+      // 在 JSON 中查找对应的 ID
+      const friend = FRIENDS_DATA.find(f => f.id === fid);
+      
       if (friend) {
-        if (env.db) context.waitUntil(recordClick(env.db, `friend_${idx}`, friend.name, 'friend', currYear, dateKey, fullTimeStr));
+        if (env.db) context.waitUntil(recordClick(env.db, friend.id, friend.name, 'friend', currYear, dateKey, fullTimeStr));
         return Response.redirect(friend.url, 302);
       }
     }
@@ -118,7 +122,8 @@ function renderNewNavHTML(TITLE, SUBTITLE, BG_IMG_URL, CONTACT, LINKS, FRIENDS) 
     </div>`;
   }).join('');
 
-  const friendsHtml = FRIENDS.map((f, i) => `<a href="/fgo/${i}" target="_blank" class="glass-card partner-card">${f.name}</a>`).join('');
+  // 友链渲染：改为使用 f.id
+  const friendsHtml = FRIENDS.map((f) => `<a href="/fgo/${f.id}" target="_blank" class="glass-card partner-card">${f.name}</a>`).join('');
 
   return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${TITLE}</title><style>
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -146,15 +151,18 @@ function renderNewNavHTML(TITLE, SUBTITLE, BG_IMG_URL, CONTACT, LINKS, FRIENDS) 
   </style></head><body><div class="container"><div class="header glass-card"><h1>${TITLE}</h1><p>${SUBTITLE}</p></div><div class="section-title">💎 精选</div><div class="grid-resources">${cardsHtml}</div><div class="section-title">🔗 友链</div><div class="grid-partners">${friendsHtml}</div></div><a href="${CONTACT}" class="fab-support">💬 获取支持</a></body></html>`;
 }
 
-/** * ✨ 管理后台 - 高清晰度美化版
- * 优化：
- * 1. 标题居中，整体上移
- * 2. 背景不纯黑，改用深蓝灰+高强度模糊，文字对比度极高
- * 3. 自动换行Grid，链接再多也不怕
- */
+/** * ✨ 管理后台 */
 function renderAdminDashboard(LINKS, FRIENDS, statsMap, T, m, BG, FS, IMG) {
+// 1. 收集所有当前有效的 ID (主链接 + 友链)
+  const activeIds = new Set([ ...LINKS.map(i => i.id), ...FRIENDS.map(i => i.id) ]);
+  
   let totalClicks = 0;
-  for (let v of statsMap.values()) totalClicks += (v.total_clicks || 0);
+  // 2. 只统计当前有效 ID 的点击数
+  for (let v of statsMap.values()) {
+      if (activeIds.has(v.id)) {
+          totalClicks += (v.total_clicks || 0);
+      }
+  }
 
   const resourceHtml = LINKS.map((item, i) => {
     const stat = statsMap.get(item.id) || { total_clicks: 0, month_clicks: 0, year_clicks: 0, last_time: '' };
@@ -181,8 +189,9 @@ function renderAdminDashboard(LINKS, FRIENDS, statsMap, T, m, BG, FS, IMG) {
     </div>`;
   }).join('');
 
-  const friendHtml = FRIENDS.map((item, i) => {
-    const id = `friend_${i}`; 
+  // 友链后台统计：改为使用 item.id
+  const friendHtml = FRIENDS.map((item) => {
+    const id = item.id; // 直接使用配置中的 ID
     const stat = statsMap.get(id) || { total_clicks: 0, month_clicks: 0, year_clicks: 0, last_time: '' };
     let simpleTime = '-';
     if (stat.last_time && stat.last_time.includes(' ')) {
@@ -201,22 +210,22 @@ function renderAdminDashboard(LINKS, FRIENDS, statsMap, T, m, BG, FS, IMG) {
 
   return `<!DOCTYPE html><html><head>${getHead(T, FS, IMG)}<style>
     /* 1. 布局优化 */
-    .main { width: 94%; max-width: 1000px; padding: 20px 0; margin-bottom: 50px; } /* 减少顶部Padding，往上走 */
+    .main { width: 94%; max-width: 1000px; padding: 20px 0; margin-bottom: 50px; } 
     
     /* 2. 标题居中与背景优化 */
     .header { 
         padding: 30px; 
-        text-align: center; /* 标题居中 */
+        text-align: center; 
         display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px;
         margin-bottom: 30px; 
-        background: rgba(30, 41, 59, 0.65); /* 稍微偏蓝灰，不是死黑 */
+        background: rgba(30, 41, 59, 0.65); 
         backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
         border: 1px solid rgba(255,255,255,0.15);
     }
     
-    /* 3. 卡片通用样式 (清晰度优化) */
+    /* 3. 卡片通用样式 */
     .glass-panel { 
-        background: rgba(30, 41, 59, 0.75); /* 加深底色，保证文字清晰 */
+        background: rgba(30, 41, 59, 0.75); 
         backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); 
         border: 1px solid rgba(255,255,255,0.1); 
         box-shadow: 0 8px 32px rgba(0,0,0,0.3); 
@@ -224,12 +233,12 @@ function renderAdminDashboard(LINKS, FRIENDS, statsMap, T, m, BG, FS, IMG) {
         transition: 0.2s;
     }
 
-    /* 4. 网格布局 (无限对齐，不会显示不全) */
+    /* 4. 网格布局 */
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
     .grid-mini { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
 
     /* 文字与细节 */
-    h1, div, span { text-shadow: 0 1px 2px rgba(0,0,0,0.8); } /* 文字加阴影，防背景干扰 */
+    h1, div, span { text-shadow: 0 1px 2px rgba(0,0,0,0.8); } 
     
     .card { padding: 20px; cursor: pointer; animation: fadeUp 0.5s backwards; }
     .card:hover { transform: translateY(-3px); border-color: #a78bfa; background: rgba(30, 41, 59, 0.9); }
