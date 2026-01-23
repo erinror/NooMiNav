@@ -153,8 +153,16 @@ function renderNewNavHTML(TITLE, SUBTITLE, BG_IMG_URL, CONTACT, LINKS, FRIENDS) 
 
 /** * ✨ 管理后台 */
 function renderAdminDashboard(LINKS, FRIENDS, statsMap, T, m, BG, FS, IMG) {
+// 1. 收集所有当前有效的 ID (主链接 + 友链)
+  const activeIds = new Set([ ...LINKS.map(i => i.id), ...FRIENDS.map(i => i.id) ]);
+  
   let totalClicks = 0;
-  for (let v of statsMap.values()) totalClicks += (v.total_clicks || 0);
+  // 2. 只统计当前有效 ID 的点击数
+  for (let v of statsMap.values()) {
+      if (activeIds.has(v.id)) {
+          totalClicks += (v.total_clicks || 0);
+      }
+  }
 
   const resourceHtml = LINKS.map((item, i) => {
     const stat = statsMap.get(item.id) || { total_clicks: 0, month_clicks: 0, year_clicks: 0, last_time: '' };
